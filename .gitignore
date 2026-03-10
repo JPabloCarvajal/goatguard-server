@@ -1,2 +1,39 @@
+# Python
 __pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# Virtual environment
+.venv/
+venv/
+
+# Logs
+*.log
+
+# PCAP output (generated at runtime)
 pcap_output/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker volumes (local data)
+pgdata/
+
+# Environment variables (secrets)
+.env
+
+# Testing
+.coverage
+.pytest_cache/
+.mypy_cache/
+
+# ML models (too large for git)
+models/*.pkl
