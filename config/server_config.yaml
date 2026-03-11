@@ -3,7 +3,8 @@ server:
   udp_port: 9998
   api_port: 8000
   host: "0.0.0.0"
-
+  subnet: "192.168.1.0/24"
+  
 pcap:
   output_dir: "pcap_output"
   rotation_seconds: 30

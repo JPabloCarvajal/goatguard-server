@@ -10,6 +10,7 @@ to change queries without touching the rest of the system.
 import logging
 from datetime import datetime
 from sqlalchemy.orm import Session
+from src.discovery.enrichment import enrich_device_vendor
 
 from src.database.models import (
     Agent,
@@ -19,14 +20,6 @@ from src.database.models import (
     NetworkCurrentMetrics,
     TopTalkerCurrent,
 )
-
-from src.database.models import (
-    Agent,
-    Device,
-    DeviceCurrentMetrics,
-    Network,
-)
-
 from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
@@ -46,7 +39,9 @@ class Repository:
         """Find an existing agent or register a new one.
 
         Parses the agent_id (HOSTNAME__MAC) to extract device info.
-        Creates Device and Agent records if they don't exist.
+        If an agent with this UID exists, updates its timestamps.
+        If not, checks if ARP already discovered a device with the
+        same MAC and reuses it instead of creating a duplicate.
 
         Args:
             agent_id: The unique agent identifier (HOSTNAME__MAC).
@@ -58,35 +53,47 @@ class Repository:
         """
         session = self._get_session()
         try:
-            # Check if agent already exists
+            # Check if agent already exists by UID
             agent = session.query(Agent).filter_by(uid=agent_id).first()
 
             if agent:
-                # Update last seen
                 agent.last_heartbeat = datetime.utcnow()
                 agent.device.last_seen = datetime.utcnow()
                 agent.device.ip = sender_ip
                 session.commit()
                 return agent.device_id
 
-            # Parse agent_id: "MALEDUCADA__CC:28:AA:09:16:04"
+            # Parse agent_id: "HOSTNAME__MAC"
             parts = agent_id.split("__")
             hostname = parts[0] if len(parts) >= 1 else "unknown"
             mac = parts[1] if len(parts) >= 2 else "00:00:00:00:00:00"
+            mac = mac.upper()
 
-            # Create new device
-            device = Device(
-                network_id=network_id,
-                ip=sender_ip,
-                mac=mac,
-                hostname=hostname,
-                has_agent=True,
-                status="active",
-            )
-            session.add(device)
-            session.flush()  # Get the auto-generated device.id
+            # Check if ARP already discovered this device by MAC
+            device = session.query(Device).filter_by(mac=mac).first()
 
-            # Create new agent
+            if device:
+                # ARP found it first — upgrade to has_agent=true
+                device.ip = sender_ip
+                device.hostname = hostname
+                device.has_agent = True
+                device.status = "active"
+                device.last_seen = datetime.utcnow()
+            else:
+                # Completely new device
+                device = Device(
+                    network_id=network_id,
+                    ip=sender_ip,
+                    mac=mac,
+                    hostname=hostname,
+                    has_agent=True,
+                    status="active",
+                )
+                session.add(device)
+
+            session.flush()
+
+            # Create the agent record
             agent = Agent(
                 device_id=device.id,
                 uid=agent_id,
@@ -382,5 +389,139 @@ class Repository:
         except Exception as e:
             session.rollback()
             logger.error(f"Failed to update heartbeat for {agent_id}: {e}")
+        finally:
+            session.close()
+
+    def update_isp_metrics(self, network_id: int, latency_avg: float,
+                            packet_loss_pct: float, jitter: float) -> None:
+        """Update ISP health metrics in network_current_metrics.
+
+        Args:
+            network_id: The network to update.
+            latency_avg: Average ping RTT in milliseconds.
+            packet_loss_pct: Percentage of lost pings.
+            jitter: Standard deviation of RTTs in milliseconds.
+        """
+        session = self._get_session()
+        try:
+            current = session.query(NetworkCurrentMetrics).filter_by(
+                network_id=network_id
+            ).first()
+
+            now = datetime.utcnow()
+
+            if current:
+                current.timestamp = now
+                current.isp_latency_avg = latency_avg
+                current.packet_loss_pct = packet_loss_pct
+                current.jitter = jitter
+            else:
+                current = NetworkCurrentMetrics(
+                    network_id=network_id,
+                    timestamp=now,
+                    isp_latency_avg=latency_avg,
+                    packet_loss_pct=packet_loss_pct,
+                    jitter=jitter,
+                )
+                session.add(current)
+
+            session.commit()
+            logger.debug("ISP metrics updated")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update ISP metrics: {e}")
+        finally:
+            session.close()
+
+    def register_discovered_device(self, network_id: int,
+                                    ip: str, mac: str) -> None:
+        """Register a device found via ARP scan.
+
+        If the device already exists (matched by MAC), updates its
+        IP and last_seen. If it's new, creates it with has_agent=false.
+
+        Matching by MAC instead of IP because IPs can change via DHCP
+        but MACs are tied to hardware (Layer 2 identifier).
+
+        Args:
+            network_id: The network where the device was found.
+            ip: IPv4 address of the discovered device.
+            mac: MAC address (normalized uppercase, colon-separated).
+        """
+        session = self._get_session()
+        try:
+            # Normalize MAC format
+            mac_normalized = mac.replace("-", ":").upper()
+
+            # Search by MAC (stable hardware identifier)
+            device = session.query(Device).filter_by(mac=mac_normalized).first()
+
+            if device:
+                device.ip = ip
+                device.last_seen = datetime.utcnow()
+                if not device.has_agent:
+                    device.status = "active"
+                if not device.detected_type:
+                    device.detected_type = enrich_device_vendor(mac_normalized)
+                session.commit()
+                return
+
+            # New device — register without agent
+            vendor = enrich_device_vendor(mac_normalized)
+
+            device = Device(
+                network_id=network_id,
+                ip=ip,
+                mac=mac_normalized,
+                has_agent=False,
+                status="active",
+                detected_type=vendor,
+            )
+
+            session.add(device)
+            session.commit()
+
+            logger.info(
+                f"New device discovered via ARP: {ip} ({mac_normalized})"
+            )
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to register discovered device {ip}: {e}")
+        finally:
+            session.close()
+
+    def mark_unseen_devices_inactive(self, network_id: int,
+                                      seen_macs: list[str]) -> int:
+        """Mark devices without agent that were NOT found by ARP as inactive.
+
+        Args:
+            network_id: The network that was scanned.
+            seen_macs: List of MAC addresses found in the latest scan.
+
+        Returns:
+            Number of devices marked inactive.
+        """
+        session = self._get_session()
+        try:
+            stale = session.query(Device).filter(
+                Device.network_id == network_id,
+                Device.has_agent == False,
+                Device.status == "active",
+                ~Device.mac.in_(seen_macs),
+            ).all()
+
+            for device in stale:
+                device.status = "inactive"
+                logger.info(f"Device no longer on network: {device.ip} ({device.mac})")
+
+            session.commit()
+            return len(stale)
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to mark unseen devices: {e}")
+            return 0
         finally:
             session.close()

@@ -16,6 +16,8 @@ from src.ingestion.pcap_assembler import PcapAssembler
 from src.analysis.zeek_runner import ZeekRunner
 from src.analysis.pipeline import AnalysisPipeline
 from src.monitoring.health_checker import HealthChecker
+from src.monitoring.isp_probe import IspProbe
+from src.discovery.arp_scanner import ArpScanner
 
 logging.basicConfig(
     level=logging.INFO,
@@ -41,6 +43,8 @@ def main():
     db.create_tables(Base)
     repo = Repository(db.get_session)
 
+    network_id = repo.ensure_default_network()
+
     health_checker = HealthChecker(
         repository=repo,
         check_interval=30,
@@ -48,7 +52,23 @@ def main():
     )
     health_checker.start()
 
-    network_id = repo.ensure_default_network()
+    isp_probe = IspProbe(
+        repository=repo,
+        network_id=network_id,
+        target="8.8.8.8",
+        interval=30,
+        ping_count=10,
+    )
+    isp_probe.start()
+
+    arp_scanner = ArpScanner(
+        repository=repo,
+        network_id=network_id,
+        subnet=config.server.subnet,
+        interval=60,
+        timeout=3,
+    )
+    arp_scanner.start()
 
     # Analysis pipeline
     zeek = ZeekRunner(output_base_dir="zeek_output")
@@ -104,6 +124,7 @@ def main():
         tcp_receiver.stop()
         udp_receiver.stop()
         health_checker.stop()
+        isp_probe.stop()
         assembler.close()
 
 

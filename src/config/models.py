@@ -20,6 +20,7 @@ class NetworkConfig:
     udp_port: int = 9998
     api_port: int = 8000
     host: str = "0.0.0.0"
+    subnet: str = "192.168.1.0/24"
 
 
 @dataclass
