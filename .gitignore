@@ -24,6 +24,7 @@ zeek_output/
 # OS
 .DS_Store
 Thumbs.db
+note.txt
 
 # Docker volumes (local data)
 pgdata/

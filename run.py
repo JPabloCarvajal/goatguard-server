@@ -15,6 +15,7 @@ from src.receivers.udp_receiver import UdpReceiver
 from src.ingestion.pcap_assembler import PcapAssembler
 from src.analysis.zeek_runner import ZeekRunner
 from src.analysis.pipeline import AnalysisPipeline
+from src.monitoring.health_checker import HealthChecker
 
 logging.basicConfig(
     level=logging.INFO,
@@ -39,6 +40,14 @@ def main():
     )
     db.create_tables(Base)
     repo = Repository(db.get_session)
+
+    health_checker = HealthChecker(
+        repository=repo,
+        check_interval=30,
+        timeout_seconds=90,
+    )
+    health_checker.start()
+
     network_id = repo.ensure_default_network()
 
     # Analysis pipeline
@@ -94,6 +103,7 @@ def main():
     except KeyboardInterrupt:
         tcp_receiver.stop()
         udp_receiver.stop()
+        health_checker.stop()
         assembler.close()
 
 

@@ -27,6 +27,8 @@ from src.database.models import (
     Network,
 )
 
+from datetime import datetime, timedelta
+
 logger = logging.getLogger(__name__)
 
 class Repository:
@@ -323,5 +325,62 @@ class Repository:
         except Exception as e:
             session.rollback()
             logger.error(f"Failed to update top talkers: {e}")
+        finally:
+            session.close()
+
+
+    def mark_inactive_agents(self, cutoff: datetime) -> int:
+        """Mark agents with last_heartbeat before cutoff as inactive.
+
+        Also updates the associated device status to "disconnected".
+
+        Args:
+            cutoff: Datetime threshold. Agents with last_heartbeat
+                    before this time are marked inactive.
+
+        Returns:
+            Number of agents marked as inactive.
+        """
+        session = self._get_session()
+        try:
+            stale_agents = session.query(Agent).filter(
+                Agent.status == "active",
+                Agent.last_heartbeat < cutoff,
+            ).all()
+
+            for agent in stale_agents:
+                agent.status = "inactive"
+                if agent.device:
+                    agent.device.status = "disconnected"
+                logger.info(
+                    f"Agent marked inactive: {agent.uid} "
+                    f"(last heartbeat: {agent.last_heartbeat})"
+                )
+
+            session.commit()
+            return len(stale_agents)
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to mark inactive agents: {e}")
+            return 0
+        finally:
+            session.close()
+
+    def update_heartbeat(self, agent_id: str) -> None:
+        """Update the last heartbeat timestamp for an agent."""
+        session = self._get_session()
+        try:
+            agent = session.query(Agent).filter_by(uid=agent_id).first()
+            if agent:
+                agent.last_heartbeat = datetime.utcnow()
+                agent.status = "active"
+                if agent.device:
+                    agent.device.status = "active"
+                    agent.device.last_seen = datetime.utcnow()
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update heartbeat for {agent_id}: {e}")
         finally:
             session.close()
