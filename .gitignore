@@ -15,6 +15,7 @@ venv/
 
 # PCAP output (generated at runtime)
 pcap_output/
+zeek_output/
 
 # IDE
 .vscode/

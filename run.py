@@ -13,9 +13,11 @@ from src.database.repository import Repository
 from src.receivers.tcp_receiver import TcpReceiver
 from src.receivers.udp_receiver import UdpReceiver
 from src.ingestion.pcap_assembler import PcapAssembler
+from src.analysis.zeek_runner import ZeekRunner
+from src.analysis.pipeline import AnalysisPipeline
 
 logging.basicConfig(
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s | %(levelname)-8s | %(name)s | %(message)s",
     datefmt="%Y-%m-%d %H:%M:%S",
 )
@@ -39,14 +41,20 @@ def main():
     repo = Repository(db.get_session)
     network_id = repo.ensure_default_network()
 
-    # PCAP assembly
-    def on_pcap_ready(path):
-        print(f"\n  >>> PCAP READY: {path}\n")
+    # Analysis pipeline
+    zeek = ZeekRunner(output_base_dir="zeek_output")
+    pipeline = AnalysisPipeline(
+        zeek_runner=zeek,
+        repository=repo,
+        network_id=network_id,
+        rotation_seconds=config.pcap.rotation_seconds,
+    )
 
+    # PCAP assembly with pipeline callback
     assembler = PcapAssembler(
         output_dir=config.pcap.output_dir,
         rotation_seconds=config.pcap.rotation_seconds,
-        on_rotation=on_pcap_ready,
+        on_rotation=pipeline.process,
     )
 
     # TCP: captured packets
@@ -77,6 +85,8 @@ def main():
     # Start everything
     tcp_receiver.start()
     udp_receiver.start()
+
+    print("\n  GOATGuard Server running. Press Ctrl+C to stop.\n")
 
     try:
         while True:

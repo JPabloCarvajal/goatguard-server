@@ -16,6 +16,15 @@ from src.database.models import (
     Device,
     DeviceCurrentMetrics,
     Network,
+    NetworkCurrentMetrics,
+    TopTalkerCurrent,
+)
+
+from src.database.models import (
+    Agent,
+    Device,
+    DeviceCurrentMetrics,
+    Network,
 )
 
 logger = logging.getLogger(__name__)
@@ -194,5 +203,125 @@ class Repository:
             session.rollback()
             logger.error(f"Failed to create default network: {e}")
             raise
+        finally:
+            session.close()
+
+        
+    def update_device_traffic_metrics(self, ip: str, bandwidth_in: float,
+                                       bandwidth_out: float,
+                                       tcp_retransmissions: int,
+                                       failed_connections: int,
+                                       unique_destinations: int,
+                                       bytes_ratio: float,
+                                       dns_response_time: float) -> None:
+        """Update traffic-derived metrics for a device identified by IP.
+
+        Only updates devices that exist in the database.
+        These metrics come from Zeek analysis, not from the agent directly.
+        """
+        session = self._get_session()
+        try:
+            device = session.query(Device).filter_by(ip=ip).first()
+            if not device:
+                return
+
+            current = session.query(DeviceCurrentMetrics).filter_by(
+                device_id=device.id
+            ).first()
+
+            if current:
+                current.bandwidth_in = bandwidth_in
+                current.bandwidth_out = bandwidth_out
+                current.tcp_retransmissions = tcp_retransmissions
+                current.failed_connections = failed_connections
+                current.unique_destinations = unique_destinations
+                current.bytes_ratio = bytes_ratio
+                current.dns_response_time = dns_response_time
+                session.commit()
+                logger.debug(f"Traffic metrics updated for {ip}")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update traffic metrics for {ip}: {e}")
+        finally:
+            session.close()
+
+    def update_network_metrics(self, network_id: int,
+                                active_connections: int,
+                                new_connections_per_min: int,
+                                failed_connections_global: int,
+                                internal_traffic_bytes: int,
+                                external_traffic_bytes: int) -> None:
+        """Update network-wide metrics via UPSERT."""
+        session = self._get_session()
+        try:
+            current = session.query(NetworkCurrentMetrics).filter_by(
+                network_id=network_id
+            ).first()
+
+            now = datetime.utcnow()
+
+            if current:
+                current.timestamp = now
+                current.active_connections = active_connections
+                current.new_connections_per_min = new_connections_per_min
+                current.failed_connections_global = failed_connections_global
+                current.internal_traffic_bytes = internal_traffic_bytes
+                current.external_traffic_bytes = external_traffic_bytes
+            else:
+                current = NetworkCurrentMetrics(
+                    network_id=network_id,
+                    timestamp=now,
+                    active_connections=active_connections,
+                    new_connections_per_min=new_connections_per_min,
+                    failed_connections_global=failed_connections_global,
+                    internal_traffic_bytes=internal_traffic_bytes,
+                    external_traffic_bytes=external_traffic_bytes,
+                )
+                session.add(current)
+
+            session.commit()
+            logger.debug("Network metrics updated")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update network metrics: {e}")
+        finally:
+            session.close()
+
+    def update_top_talkers(self, network_id: int,
+                            top_talkers: list[dict]) -> None:
+        """Replace current top talkers with new rankings.
+
+        Deletes all existing entries and inserts the new ranking.
+        Done in a single transaction for consistency.
+        """
+        session = self._get_session()
+        try:
+            session.query(TopTalkerCurrent).filter_by(
+                network_id=network_id
+            ).delete()
+
+            for talker in top_talkers:
+                device = session.query(Device).filter_by(
+                    ip=talker["ip"]
+                ).first()
+
+                if device:
+                    entry = TopTalkerCurrent(
+                        network_id=network_id,
+                        device_id=device.id,
+                        total_consumption=talker["total_consumption"],
+                        rank=talker["rank"],
+                        is_hog=talker["is_hog"],
+                    )
+                    session.add(entry)
+
+            session.commit()
+            logger.debug(f"Top talkers updated: {len(top_talkers)} entries")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update top talkers: {e}")
         finally:
             session.close()

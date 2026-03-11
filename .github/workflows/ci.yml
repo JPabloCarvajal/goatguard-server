@@ -1,0 +1,51 @@
+name: Server CI
+
+on:
+  push:
+    branches: [main, develop]
+  pull_request:
+    branches: [main, develop]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: goatguard_test
+          POSTGRES_USER: goatguard
+          POSTGRES_PASSWORD: goatguard
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: |
+          pip install pyyaml psutil sqlalchemy psycopg2-binary
+          pip install pytest ruff
+
+      - name: Run linter
+        run: ruff check src/
+
+      - name: Run tests
+        env:
+          PYTHONPATH: .
+          DB_HOST: localhost
+          DB_PORT: 5432
+          DB_NAME: goatguard_test
+          DB_USER: goatguard
+          DB_PASSWORD: goatguard
+        run: pytest tests/ -v
