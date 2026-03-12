@@ -23,6 +23,9 @@ from src.api.routes import auth as auth_routes
 from src.api.routes import devices as device_routes
 from src.api.routes import network as network_routes
 from src.api.routes import alerts as alert_routes
+import asyncio
+from src.api.websocket import router as ws_router
+from src.api.websocket import broadcast_loop
 
 logger = logging.getLogger(__name__)
 
@@ -74,6 +77,11 @@ def create_app(database: Database, config) -> FastAPI:
     app.include_router(network_routes.router)
     app.include_router(alert_routes.router)
 
+    app.include_router(ws_router)
+    @app.on_event("startup")
+    async def start_broadcast():
+        asyncio.create_task(broadcast_loop(database.get_session))
+        
     logger.info("FastAPI application created")
 
     return app
