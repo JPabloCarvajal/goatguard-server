@@ -112,7 +112,7 @@ def create_token(user_id: int, username: str) -> str:
     """
     now = datetime.utcnow()
     payload = {
-        "sub": user_id,
+        "sub": str(user_id),
         "username": username,
         "exp": now + timedelta(hours=_jwt_expiration_hours),
         "iat": now,
