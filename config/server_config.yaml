@@ -20,3 +20,8 @@ database:
 logging:
   level: "INFO"
   file: "goatguard_server.log"
+
+security:
+  jwt_secret: "goatguard-dev-secret-change-in-production"
+  jwt_algorithm: "HS256"
+  jwt_expiration_hours: 24

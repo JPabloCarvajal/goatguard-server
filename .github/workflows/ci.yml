@@ -43,9 +43,11 @@ jobs:
       - name: Run tests
         env:
           PYTHONPATH: .
-          DB_HOST: localhost
-          DB_PORT: 5432
-          DB_NAME: goatguard_test
-          DB_USER: goatguard
-          DB_PASSWORD: goatguard
+          GOATGUARD_DB_HOST: localhost
+          GOATGUARD_DB_PORT: 5432
+          GOATGUARD_DB_NAME: goatguard_test
+          GOATGUARD_DB_USER: goatguard
+          GOATGUARD_DB_PASSWORD: goatguard
+          GOATGUARD_JWT_SECRET: ci-test-secret-not-for-production
+          
         run: pytest tests/ -v

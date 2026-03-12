@@ -7,5 +7,7 @@ from src.config.models import (
     DatabaseConfig as DatabaseConfig,
     LoggingConfig as LoggingConfig,
     ConfigError as ConfigError,
+    SecurityConfig as SecurityConfig,
 )
+
 from src.config.loader import load_config as load_config
