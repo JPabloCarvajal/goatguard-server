@@ -14,12 +14,20 @@ class ConfigError(Exception):
 
 
 @dataclass
+class SecurityConfig:
+    """Security settings for authentication and encryption."""
+    jwt_secret: str = "goatguard-dev-secret-change-in-production"
+    jwt_algorithm: str = "HS256"
+    jwt_expiration_hours: int = 24
+
+@dataclass
 class NetworkConfig:
     """Network ports and bind address for all server listeners."""
     tcp_port: int = 9999
     udp_port: int = 9998
     api_port: int = 8000
     host: str = "0.0.0.0"
+    subnet: str = "192.168.1.0/24"
 
 
 @dataclass
@@ -67,3 +75,4 @@ class ServerConfig:
     pcap: PcapConfig = field(default_factory=PcapConfig)
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
+    security: SecurityConfig = field(default_factory=SecurityConfig)

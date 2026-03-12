@@ -1,0 +1,505 @@
+"""
+Database repository for GOATGuard server.
+
+Encapsulates all database operations behind simple methods.
+Other modules never write SQL directly — they call repository
+methods. This isolates the database logic and makes it easy
+to change queries without touching the rest of the system.
+"""
+
+import logging
+from datetime import datetime
+from src.discovery.enrichment import enrich_device_vendor
+
+from src.database.models import (
+    Agent,
+    Device,
+    DeviceCurrentMetrics,
+    Network,
+    NetworkCurrentMetrics,
+    TopTalkerCurrent,
+)
+
+logger = logging.getLogger(__name__)
+
+class Repository:
+    """Handles all database read/write operations.
+
+    Args:
+        db_session_factory: A callable that returns a new SQLAlchemy Session.
+    """
+
+    def __init__(self, db_session_factory) -> None:
+        self._get_session = db_session_factory
+    
+    def get_or_create_agent(self, agent_id: str, sender_ip: str,
+                            network_id: int = 1) -> int:
+        """Find an existing agent or register a new one.
+
+        Parses the agent_id (HOSTNAME__MAC) to extract device info.
+        If an agent with this UID exists, updates its timestamps.
+        If not, checks if ARP already discovered a device with the
+        same MAC and reuses it instead of creating a duplicate.
+
+        Args:
+            agent_id: The unique agent identifier (HOSTNAME__MAC).
+            sender_ip: The IP address the agent is sending from.
+            network_id: The network this agent belongs to.
+
+        Returns:
+            The device_id associated with this agent.
+        """
+        session = self._get_session()
+        try:
+            # Check if agent already exists by UID
+            agent = session.query(Agent).filter_by(uid=agent_id).first()
+
+            if agent:
+                agent.last_heartbeat = datetime.utcnow()
+                agent.device.last_seen = datetime.utcnow()
+                agent.device.ip = sender_ip
+                session.commit()
+                return agent.device_id
+
+            # Parse agent_id: "HOSTNAME__MAC"
+            parts = agent_id.split("__")
+            hostname = parts[0] if len(parts) >= 1 else "unknown"
+            mac = parts[1] if len(parts) >= 2 else "00:00:00:00:00:00"
+            mac = mac.upper()
+
+            # Check if ARP already discovered this device by MAC
+            device = session.query(Device).filter_by(mac=mac).first()
+
+            if device:
+                # ARP found it first — upgrade to has_agent=true
+                device.ip = sender_ip
+                device.hostname = hostname
+                device.has_agent = True
+                device.status = "active"
+                device.last_seen = datetime.utcnow()
+            else:
+                # Completely new device
+                device = Device(
+                    network_id=network_id,
+                    ip=sender_ip,
+                    mac=mac,
+                    hostname=hostname,
+                    has_agent=True,
+                    status="active",
+                )
+                session.add(device)
+
+            session.flush()
+
+            # Create the agent record
+            agent = Agent(
+                device_id=device.id,
+                uid=agent_id,
+                status="active",
+            )
+            session.add(agent)
+            session.commit()
+
+            logger.info(f"New agent registered: {agent_id} (device_id={device.id})")
+            return device.id
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to register agent {agent_id}: {e}")
+            raise
+        finally:
+            session.close()
+
+    
+    def save_device_metrics(self, device_id: int, metrics: dict) -> None:
+        """Save or update current metrics for a device.
+
+        Uses UPSERT logic: if a row exists for this device_id,
+        updates it. If not, creates a new one. This keeps exactly
+        one row per device in device_current_metrics.
+
+        Args:
+            device_id: The device to update.
+            metrics: Dictionary with metric values from the agent.
+        """
+        session = self._get_session()
+        try:
+            current = session.query(DeviceCurrentMetrics).filter_by(
+                device_id=device_id
+            ).first()
+
+            now = datetime.utcnow()
+
+            if current:
+                current.timestamp = now
+                current.cpu_pct = metrics.get("cpu_percent")
+                current.ram_pct = metrics.get("ram_percent")
+                current.disk_usage_pct = metrics.get("disk_usage_percent")
+                current.link_speed = metrics.get("link_speed_mbps")
+                current.cpu_count = metrics.get("cpu_count")
+                current.ram_total_bytes = metrics.get("ram_total_bytes")
+                current.ram_available_bytes = metrics.get("ram_available_bytes")
+                current.uptime_seconds = metrics.get("uptime_seconds")
+            else:
+                current = DeviceCurrentMetrics(
+                    device_id=device_id,
+                    timestamp=now,
+                    cpu_pct=metrics.get("cpu_percent"),
+                    ram_pct=metrics.get("ram_percent"),
+                    disk_usage_pct=metrics.get("disk_usage_percent"),
+                    link_speed=metrics.get("link_speed_mbps"),
+                    cpu_count=metrics.get("cpu_count"),
+                    ram_total_bytes=metrics.get("ram_total_bytes"),
+                    ram_available_bytes=metrics.get("ram_available_bytes"),
+                    uptime_seconds=metrics.get("uptime_seconds"),
+                )
+                session.add(current)
+
+            session.commit()
+            logger.debug(f"Metrics saved for device {device_id}")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to save metrics for device {device_id}: {e}")
+        finally:
+            session.close()
+    
+    def ensure_default_network(self) -> int:
+        """Create the default network if it doesn't exist.
+
+        Returns:
+            The network_id of the default network.
+        """
+        session = self._get_session()
+        try:
+            network = session.query(Network).first()
+            if network:
+                return network.id
+
+            network = Network(
+                name="Default LAN",
+                subnet="192.168.1.0/24",
+                gateway="192.168.1.1",
+            )
+            session.add(network)
+            session.commit()
+            logger.info(f"Default network created: {network.name}")
+            return network.id
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to create default network: {e}")
+            raise
+        finally:
+            session.close()
+
+        
+    def update_device_traffic_metrics(self, ip: str, bandwidth_in: float,
+                                       bandwidth_out: float,
+                                       tcp_retransmissions: int,
+                                       failed_connections: int,
+                                       unique_destinations: int,
+                                       bytes_ratio: float,
+                                       dns_response_time: float) -> None:
+        """Update traffic-derived metrics for a device identified by IP.
+
+        Only updates devices that exist in the database.
+        These metrics come from Zeek analysis, not from the agent directly.
+        """
+        session = self._get_session()
+        try:
+            device = session.query(Device).filter_by(ip=ip).first()
+            if not device:
+                return
+
+            current = session.query(DeviceCurrentMetrics).filter_by(
+                device_id=device.id
+            ).first()
+
+            if current:
+                current.bandwidth_in = bandwidth_in
+                current.bandwidth_out = bandwidth_out
+                current.tcp_retransmissions = tcp_retransmissions
+                current.failed_connections = failed_connections
+                current.unique_destinations = unique_destinations
+                current.bytes_ratio = bytes_ratio
+                current.dns_response_time = dns_response_time
+                session.commit()
+                logger.debug(f"Traffic metrics updated for {ip}")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update traffic metrics for {ip}: {e}")
+        finally:
+            session.close()
+
+    def update_network_metrics(self, network_id: int,
+                                active_connections: int,
+                                new_connections_per_min: int,
+                                failed_connections_global: int,
+                                internal_traffic_bytes: int,
+                                external_traffic_bytes: int) -> None:
+        """Update network-wide metrics via UPSERT."""
+        session = self._get_session()
+        try:
+            current = session.query(NetworkCurrentMetrics).filter_by(
+                network_id=network_id
+            ).first()
+
+            now = datetime.utcnow()
+
+            if current:
+                current.timestamp = now
+                current.active_connections = active_connections
+                current.new_connections_per_min = new_connections_per_min
+                current.failed_connections_global = failed_connections_global
+                current.internal_traffic_bytes = internal_traffic_bytes
+                current.external_traffic_bytes = external_traffic_bytes
+            else:
+                current = NetworkCurrentMetrics(
+                    network_id=network_id,
+                    timestamp=now,
+                    active_connections=active_connections,
+                    new_connections_per_min=new_connections_per_min,
+                    failed_connections_global=failed_connections_global,
+                    internal_traffic_bytes=internal_traffic_bytes,
+                    external_traffic_bytes=external_traffic_bytes,
+                )
+                session.add(current)
+
+            session.commit()
+            logger.debug("Network metrics updated")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update network metrics: {e}")
+        finally:
+            session.close()
+
+    def update_top_talkers(self, network_id: int,
+                            top_talkers: list[dict]) -> None:
+        """Replace current top talkers with new rankings.
+
+        Deletes all existing entries and inserts the new ranking.
+        Done in a single transaction for consistency.
+        """
+        session = self._get_session()
+        try:
+            session.query(TopTalkerCurrent).filter_by(
+                network_id=network_id
+            ).delete()
+
+            for talker in top_talkers:
+                device = session.query(Device).filter_by(
+                    ip=talker["ip"]
+                ).first()
+
+                if device:
+                    entry = TopTalkerCurrent(
+                        network_id=network_id,
+                        device_id=device.id,
+                        total_consumption=talker["total_consumption"],
+                        rank=talker["rank"],
+                        is_hog=talker["is_hog"],
+                    )
+                    session.add(entry)
+
+            session.commit()
+            logger.debug(f"Top talkers updated: {len(top_talkers)} entries")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update top talkers: {e}")
+        finally:
+            session.close()
+
+
+    def mark_inactive_agents(self, cutoff: datetime) -> int:
+        """Mark agents with last_heartbeat before cutoff as inactive.
+
+        Also updates the associated device status to "disconnected".
+
+        Args:
+            cutoff: Datetime threshold. Agents with last_heartbeat
+                    before this time are marked inactive.
+
+        Returns:
+            Number of agents marked as inactive.
+        """
+        session = self._get_session()
+        try:
+            stale_agents = session.query(Agent).filter(
+                Agent.status == "active",
+                Agent.last_heartbeat < cutoff,
+            ).all()
+
+            for agent in stale_agents:
+                agent.status = "inactive"
+                if agent.device:
+                    agent.device.status = "disconnected"
+                logger.info(
+                    f"Agent marked inactive: {agent.uid} "
+                    f"(last heartbeat: {agent.last_heartbeat})"
+                )
+
+            session.commit()
+            return len(stale_agents)
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to mark inactive agents: {e}")
+            return 0
+        finally:
+            session.close()
+
+    def update_heartbeat(self, agent_id: str) -> None:
+        """Update the last heartbeat timestamp for an agent."""
+        session = self._get_session()
+        try:
+            agent = session.query(Agent).filter_by(uid=agent_id).first()
+            if agent:
+                agent.last_heartbeat = datetime.utcnow()
+                agent.status = "active"
+                if agent.device:
+                    agent.device.status = "active"
+                    agent.device.last_seen = datetime.utcnow()
+                session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update heartbeat for {agent_id}: {e}")
+        finally:
+            session.close()
+
+    def update_isp_metrics(self, network_id: int, latency_avg: float,
+                            packet_loss_pct: float, jitter: float) -> None:
+        """Update ISP health metrics in network_current_metrics.
+
+        Args:
+            network_id: The network to update.
+            latency_avg: Average ping RTT in milliseconds.
+            packet_loss_pct: Percentage of lost pings.
+            jitter: Standard deviation of RTTs in milliseconds.
+        """
+        session = self._get_session()
+        try:
+            current = session.query(NetworkCurrentMetrics).filter_by(
+                network_id=network_id
+            ).first()
+
+            now = datetime.utcnow()
+
+            if current:
+                current.timestamp = now
+                current.isp_latency_avg = latency_avg
+                current.packet_loss_pct = packet_loss_pct
+                current.jitter = jitter
+            else:
+                current = NetworkCurrentMetrics(
+                    network_id=network_id,
+                    timestamp=now,
+                    isp_latency_avg=latency_avg,
+                    packet_loss_pct=packet_loss_pct,
+                    jitter=jitter,
+                )
+                session.add(current)
+
+            session.commit()
+            logger.debug("ISP metrics updated")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to update ISP metrics: {e}")
+        finally:
+            session.close()
+
+    def register_discovered_device(self, network_id: int,
+                                    ip: str, mac: str) -> None:
+        """Register a device found via ARP scan.
+
+        If the device already exists (matched by MAC), updates its
+        IP and last_seen. If it's new, creates it with has_agent=false.
+
+        Matching by MAC instead of IP because IPs can change via DHCP
+        but MACs are tied to hardware (Layer 2 identifier).
+
+        Args:
+            network_id: The network where the device was found.
+            ip: IPv4 address of the discovered device.
+            mac: MAC address (normalized uppercase, colon-separated).
+        """
+        session = self._get_session()
+        try:
+            # Normalize MAC format
+            mac_normalized = mac.replace("-", ":").upper()
+
+            # Search by MAC (stable hardware identifier)
+            device = session.query(Device).filter_by(mac=mac_normalized).first()
+
+            if device:
+                device.ip = ip
+                device.last_seen = datetime.utcnow()
+                if not device.has_agent:
+                    device.status = "active"
+                if not device.detected_type:
+                    device.detected_type = enrich_device_vendor(mac_normalized)
+                session.commit()
+                return
+
+            # New device — register without agent
+            vendor = enrich_device_vendor(mac_normalized)
+
+            device = Device(
+                network_id=network_id,
+                ip=ip,
+                mac=mac_normalized,
+                has_agent=False,
+                status="active",
+                detected_type=vendor,
+            )
+
+            session.add(device)
+            session.commit()
+
+            logger.info(
+                f"New device discovered via ARP: {ip} ({mac_normalized})"
+            )
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to register discovered device {ip}: {e}")
+        finally:
+            session.close()
+
+    def mark_unseen_devices_inactive(self, network_id: int,
+                                      seen_macs: list[str]) -> int:
+        """Mark devices without agent that were NOT found by ARP as inactive.
+
+        Args:
+            network_id: The network that was scanned.
+            seen_macs: List of MAC addresses found in the latest scan.
+
+        Returns:
+            Number of devices marked inactive.
+        """
+        session = self._get_session()
+        try:
+            stale = session.query(Device).filter(
+                Device.network_id == network_id,
+                Device.has_agent.is_(False),
+                Device.status == "active",
+                ~Device.mac.in_(seen_macs),
+            ).all()
+
+            for device in stale:
+                device.status = "inactive"
+                logger.info(f"Device no longer on network: {device.ip} ({device.mac})")
+
+            session.commit()
+            return len(stale)
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to mark unseen devices: {e}")
+            return 0
+        finally:
+            session.close()

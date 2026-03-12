@@ -8,7 +8,7 @@ and validates values before returning.
 import logging
 from pathlib import Path
 from typing import Optional
-
+import os
 import yaml
 
 from src.config.models import (
@@ -18,6 +18,7 @@ from src.config.models import (
     NetworkConfig,
     PcapConfig,
     ServerConfig,
+    SecurityConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -42,7 +43,8 @@ def load_config(file_path: Optional[Path] = None) -> ServerConfig:
     raw = _load_yaml(file_path)
     config = _build_config(raw)
     _validate(config)
-
+    _apply_env_overrides(config)
+    
     logger.info(
         f"Configuration loaded: TCP={config.server.tcp_port}, "
         f"UDP={config.server.udp_port}, API={config.server.api_port}"
@@ -88,6 +90,7 @@ def _build_config(raw: dict) -> ServerConfig:
         pcap=PcapConfig(**raw.get("pcap", {})),
         database=DatabaseConfig(**raw.get("database", {})),
         logging=LoggingConfig(**raw.get("logging", {})),
+        security=SecurityConfig(**raw.get("security", {})),
     )
 
 
@@ -108,3 +111,31 @@ def _validate(config: ServerConfig) -> None:
     valid_levels = ["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     if config.logging.level.upper() not in valid_levels:
         raise ConfigError(f"Invalid logging level: '{config.logging.level}'")
+    
+
+
+def _apply_env_overrides(config: ServerConfig) -> None:
+    """Override config values with environment variables if present.
+
+    Environment variables take precedence over YAML values.
+    This allows production secrets to be injected without
+    modifying configuration files.
+
+    Convention: GOATGUARD_SECTION_FIELD
+        GOATGUARD_DB_PASSWORD → config.database.password
+        GOATGUARD_JWT_SECRET → config.security.jwt_secret
+    """
+    env_map = {
+        "GOATGUARD_DB_HOST": lambda v: setattr(config.database, "host", v),
+        "GOATGUARD_DB_PORT": lambda v: setattr(config.database, "port", int(v)),
+        "GOATGUARD_DB_NAME": lambda v: setattr(config.database, "name", v),
+        "GOATGUARD_DB_USER": lambda v: setattr(config.database, "user", v),
+        "GOATGUARD_DB_PASSWORD": lambda v: setattr(config.database, "password", v),
+        "GOATGUARD_JWT_SECRET": lambda v: setattr(config.security, "jwt_secret", v),
+    }
+
+    for env_var, setter in env_map.items():
+        value = os.environ.get(env_var)
+        if value is not None:
+            setter(value)
+            logger.info(f"Config override from environment: {env_var}")
