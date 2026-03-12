@@ -254,7 +254,7 @@ if __name__ == "__main__":
         # Try root zeek_output if no subdirectories
         connections = parse_conn_log(Path("zeek_output"))
 
-    print(f"\n=== DEVICE METRICS ===")
+    print("\n=== DEVICE METRICS ===")
     device_metrics = calculate_device_metrics(connections)
     for ip, metrics in device_metrics.items():
         print(
@@ -267,12 +267,12 @@ if __name__ == "__main__":
             f"ratio={metrics['bytes_ratio']}"
         )
 
-    print(f"\n=== NETWORK METRICS ===")
+    print("\n=== NETWORK METRICS ===")
     net_metrics = calculate_network_metrics(connections)
     for key, value in net_metrics.items():
         print(f"  {key}: {value}")
 
-    print(f"\n=== TOP TALKERS ===")
+    print("\n=== TOP TALKERS ===")
     top = calculate_top_talkers(device_metrics)
     for t in top:
         hog = " [HOG]" if t["is_hog"] else ""

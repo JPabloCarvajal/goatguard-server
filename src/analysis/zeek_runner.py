@@ -95,7 +95,7 @@ class ZeekRunner:
 
         except subprocess.TimeoutExpired:
             logger.error(f"Zeek timed out processing {pcap_path.name}")
-            raise RuntimeError(f"Zeek timed out after 120 seconds")
+            raise RuntimeError("Zeek timed out after 120 seconds")
 
         # Verify output
         conn_log = log_dir / "conn.log"

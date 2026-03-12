@@ -9,7 +9,6 @@ to change queries without touching the rest of the system.
 
 import logging
 from datetime import datetime
-from sqlalchemy.orm import Session
 from src.discovery.enrichment import enrich_device_vendor
 
 from src.database.models import (
@@ -20,7 +19,6 @@ from src.database.models import (
     NetworkCurrentMetrics,
     TopTalkerCurrent,
 )
-from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -163,26 +161,6 @@ class Repository:
         except Exception as e:
             session.rollback()
             logger.error(f"Failed to save metrics for device {device_id}: {e}")
-        finally:
-            session.close()
-    
-    def update_heartbeat(self, agent_id: str) -> None:
-        """Update the last heartbeat timestamp for an agent.
-
-        Args:
-            agent_id: The unique agent identifier.
-        """
-        session = self._get_session()
-        try:
-            agent = session.query(Agent).filter_by(uid=agent_id).first()
-            if agent:
-                agent.last_heartbeat = datetime.utcnow()
-                agent.status = "active"
-                session.commit()
-                logger.debug(f"Heartbeat updated for {agent_id}")
-        except Exception as e:
-            session.rollback()
-            logger.error(f"Failed to update heartbeat for {agent_id}: {e}")
         finally:
             session.close()
     
@@ -507,7 +485,7 @@ class Repository:
         try:
             stale = session.query(Device).filter(
                 Device.network_id == network_id,
-                Device.has_agent == False,
+                Device.has_agent.is_(False),
                 Device.status == "active",
                 ~Device.mac.in_(seen_macs),
             ).all()

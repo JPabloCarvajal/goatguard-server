@@ -8,7 +8,7 @@ and the ER diagram.
 
 from datetime import datetime
 from sqlalchemy import (
-    Boolean, Column, DateTime, Float, Integer, String, Text,
+    Boolean, Column, DateTime, Integer, String, Text,
     BigInteger, ForeignKey, Numeric,
 )
 from sqlalchemy.orm import declarative_base, relationship

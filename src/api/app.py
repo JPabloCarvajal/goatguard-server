@@ -19,7 +19,6 @@ from src.api.auth import init_auth
 from src.api.dependencies import set_database
 from src.api.routes import auth as auth_routes
 from src.database.connection import Database
-from src.api.routes import auth as auth_routes
 from src.api.routes import devices as device_routes
 from src.api.routes import network as network_routes
 from src.api.routes import alerts as alert_routes

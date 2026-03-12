@@ -21,52 +21,6 @@ from src.analysis.metrics_calculator import (
 )
 
 logger = logging.getLogger(__name__)
-
-class AnalysisPipeline:
-    """Processes rotated PCAP files through the full analysis chain.
-
-    Each call to process() runs the complete pipeline:
-    1. Zeek analyzes the PCAP file
-    2. Log parser extracts structured data
-    3. Metrics calculator computes per-device and network metrics
-    4. Results are passed to the repository for persistence
-
-    Args:
-        zeek_runner: ZeekRunner instance for PCAP processing.
-        repository: Database repository for persisting results.
-        network_id: ID of the monitored network in the database.
-        rotation_seconds: PCAP rotation interval (for rate calculations).
-    """
-
-    def __init__(self, zeek_runner: ZeekRunner, repository,
-                 network_id: int, rotation_seconds: int = 30) -> None:
-        self.zeek = zeek_runner
-        self.repo = repository
-        self.network_id = network_id
-        self.rotation_seconds = rotation_seconds
-    
-class AnalysisPipeline:
-    """Processes rotated PCAP files through the full analysis chain.
-
-    Each call to process() runs the complete pipeline:
-    1. Zeek analyzes the PCAP file
-    2. Log parser extracts structured data
-    3. Metrics calculator computes per-device and network metrics
-    4. Results are passed to the repository for persistence
-
-    Args:
-        zeek_runner: ZeekRunner instance for PCAP processing.
-        repository: Database repository for persisting results.
-        network_id: ID of the monitored network in the database.
-        rotation_seconds: PCAP rotation interval (for rate calculations).
-    """
-
-    def __init__(self, zeek_runner: ZeekRunner, repository,
-                 network_id: int, rotation_seconds: int = 30) -> None:
-        self.zeek = zeek_runner
-        self.repo = repository
-        self.network_id = network_id
-        self.rotation_seconds = rotation_seconds
     
 class AnalysisPipeline:
     """Processes rotated PCAP files through the full analysis chain.

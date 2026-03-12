@@ -20,12 +20,10 @@ Flow:
 """
 
 import asyncio
-import json
 import logging
 from typing import Set
 
 from fastapi import WebSocket, WebSocketDisconnect, APIRouter
-from sqlalchemy.orm import Session
 
 from src.api.auth import verify_token
 
