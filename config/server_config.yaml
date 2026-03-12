@@ -3,7 +3,8 @@ server:
   udp_port: 9998
   api_port: 8000
   host: "0.0.0.0"
-
+  subnet: "192.168.1.0/24"
+  
 pcap:
   output_dir: "pcap_output"
   rotation_seconds: 30
@@ -19,3 +20,8 @@ database:
 logging:
   level: "INFO"
   file: "goatguard_server.log"
+
+security:
+  jwt_secret: "goatguard-dev-secret-change-in-production"
+  jwt_algorithm: "HS256"
+  jwt_expiration_hours: 24
