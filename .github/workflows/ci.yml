@@ -1,53 +1,56 @@
-name: Server CI
+# GOATGuard Server — CI: Lint + Tests
+# RNF-11: Pipeline CI/CD para backend [NFR-007]
+#
+# ADVERTENCIA DE SEGURIDAD:
+#   config/server_config.yaml contiene jwt_secret hardcodeado.
+#   Rotar ANTES de hacer el repo público. En producción usar
+#   la variable de entorno JWT_SECRET (ver Dockerfile).
+
+name: CI
 
 on:
   push:
-    branches: [main, develop]
+    branches: [main]
   pull_request:
-    branches: [main, develop]
+    branches: [main]
 
 jobs:
-  test:
+  lint-and-test:
     runs-on: ubuntu-latest
-
-    services:
-      postgres:
-        image: postgres:15
-        env:
-          POSTGRES_DB: goatguard_test
-          POSTGRES_USER: goatguard
-          POSTGRES_PASSWORD: goatguard
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
+    timeout-minutes: 10
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      - uses: actions/setup-python@v5
+      - name: Setup Python 3.12
+        uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
+
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: pip-${{ runner.os }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt') }}
+          restore-keys: pip-${{ runner.os }}-
 
       - name: Install dependencies
         run: |
-          pip install pyyaml psutil sqlalchemy psycopg2-binary
-          pip install pytest ruff
+          pip install --upgrade pip
+          pip install -r requirements-dev.txt
 
-      - name: Run linter
-        run: ruff check src/
+      - name: Lint with ruff
+        run: ruff check src/ tests/
 
       - name: Run tests
         env:
           PYTHONPATH: .
-          GOATGUARD_DB_HOST: localhost
-          GOATGUARD_DB_PORT: 5432
-          GOATGUARD_DB_NAME: goatguard_test
-          GOATGUARD_DB_USER: goatguard
-          GOATGUARD_DB_PASSWORD: goatguard
-          GOATGUARD_JWT_SECRET: ci-test-secret-not-for-production
-          
-        run: pytest tests/ -v
+        run: pytest tests/ -v --cov=src --cov-report=xml --cov-report=term-missing
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage.xml

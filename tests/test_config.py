@@ -2,7 +2,7 @@
 import sys
 sys.path.insert(0, ".")
 
-from src.config.models import ServerConfig, NetworkConfig, PcapConfig, DatabaseConfig, SecurityConfig
+from src.config.models import ServerConfig, NetworkConfig, SecurityConfig
 
 
 def test_default_config():
