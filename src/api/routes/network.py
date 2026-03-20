@@ -365,7 +365,6 @@ def get_isp_health(
     Designed for gauge/speedometer widgets.
     """
     from datetime import datetime, timedelta
-    from sqlalchemy import func
 
     network = db.query(Network).first()
 
