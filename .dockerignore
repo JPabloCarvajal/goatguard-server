@@ -1,0 +1,13 @@
+.venv/
+__pycache__/
+*.pyc
+pcap_output/
+zeek_output/
+logs/
+*.log
+.git/
+.github/
+tests/
+docker-compose.yml
+seed.py
+test_ws.py
