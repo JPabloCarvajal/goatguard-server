@@ -18,6 +18,7 @@ from src.analysis.pipeline import AnalysisPipeline
 from src.monitoring.health_checker import HealthChecker
 from src.monitoring.isp_probe import IspProbe
 from src.discovery.arp_scanner import ArpScanner
+import threading
 
 logging.basicConfig(
     level=logging.INFO,
@@ -80,10 +81,15 @@ def main():
     )
 
     # PCAP assembly with pipeline callback
+    def on_rotation_async(pcap_path):
+        """Run pipeline in a separate thread to avoid blocking packet writes."""
+        t = threading.Thread(target=pipeline.process, args=(pcap_path,), daemon=True)
+        t.start()
+
     assembler = PcapAssembler(
         output_dir=config.pcap.output_dir,
         rotation_seconds=config.pcap.rotation_seconds,
-        on_rotation=pipeline.process,
+        on_rotation=on_rotation_async,
     )
 
     # TCP: captured packets
