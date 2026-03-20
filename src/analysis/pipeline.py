@@ -14,6 +14,7 @@ from pathlib import Path
 
 from src.analysis.zeek_runner import ZeekRunner
 from src.analysis.log_parser import parse_conn_log, parse_dns_log
+from src.discovery.enrichment import enrich_connections
 from src.analysis.metrics_calculator import (
     calculate_device_metrics,
     calculate_network_metrics,
@@ -58,6 +59,8 @@ class AnalysisPipeline:
             # Step 2: Parse logs
             connections = parse_conn_log(log_dir)
             dns_queries = parse_dns_log(log_dir)
+            # Step 2.5: Enrich external IPs with hostnames
+            connections = enrich_connections(connections)
 
             if not connections:
                 logger.info(f"No connections in {pcap_path}, skipping")
@@ -77,8 +80,17 @@ class AnalysisPipeline:
 
             # Step 5: Persist to database
             self._save_device_metrics(device_metrics, dns_metrics)
-            self._save_network_metrics(network_metrics)
+            self._save_network_metrics(network_metrics, dns_metrics)
             self._save_top_talkers(top_talkers)
+
+            # Step 6: Save historical snapshots
+            self._save_snapshots(
+                device_metrics, dns_metrics,
+                network_metrics, top_talkers,
+            )
+
+            # Step 7: Save recent connections with resolved hostnames
+            self.repo.save_recent_connections(connections)
 
             logger.info(
                 f"Pipeline complete for {Path(pcap_path).name}: "
@@ -89,6 +101,51 @@ class AnalysisPipeline:
 
         except Exception as e:
             logger.error(f"Pipeline failed for {pcap_path}: {e}")
+    
+    def _save_snapshots(self, device_metrics: dict, dns_metrics: dict,
+                         network_metrics: dict, top_talkers: list[dict]) -> None:
+        """Save historical snapshots for trend graphs.
+
+        Creates a network snapshot first (to get its ID), then
+        creates endpoint snapshots referencing it, and finally
+        saves the top talker ranking for this cycle.
+        """
+        # Network snapshot (returns its ID)
+        snapshot_id = self.repo.save_network_snapshot(
+            network_id=self.network_id,
+            metrics=network_metrics,
+        )
+
+        if snapshot_id == -1:
+            return
+
+        # Endpoint snapshots for each device with metrics
+        for ip, metrics in device_metrics.items():
+            if not ip.startswith("192.168.") and not ip.startswith("10."):
+                continue
+
+            dns_rt = dns_metrics.get(ip, 0.0)
+            metrics["dns_response_time"] = dns_rt
+
+            # Find device_id by IP
+            session = self.repo._get_session()
+            try:
+                from src.database.models import Device
+                device = session.query(Device).filter_by(ip=ip).first()
+                if device:
+                    self.repo.save_endpoint_snapshot(
+                        device_id=device.id,
+                        network_snapshot_id=snapshot_id,
+                        metrics=metrics,
+                    )
+            finally:
+                session.close()
+
+        # Top talker snapshot
+        self.repo.save_top_talker_snapshot(
+            network_snapshot_id=snapshot_id,
+            top_talkers=top_talkers,
+        )
     
     def _calculate_dns_metrics(self, dns_queries: list[dict]) -> dict:
         """Calculate average DNS response time per device.
@@ -144,8 +201,16 @@ class AnalysisPipeline:
                 dns_response_time=dns_rt,
             )
 
-    def _save_network_metrics(self, network_metrics: dict) -> None:
+    def _save_network_metrics(self, network_metrics: dict,
+                               dns_metrics: dict) -> None:
         """Save network-wide metrics to the database."""
+        # Calculate network-wide DNS response time average
+        if dns_metrics:
+            dns_values = [v for v in dns_metrics.values() if v > 0]
+            dns_avg = sum(dns_values) / len(dns_values) if dns_values else None
+        else:
+            dns_avg = None
+
         self.repo.update_network_metrics(
             network_id=self.network_id,
             active_connections=network_metrics["active_connections"],
@@ -153,6 +218,7 @@ class AnalysisPipeline:
             failed_connections_global=network_metrics["failed_connections_global"],
             internal_traffic_bytes=network_metrics["internal_traffic_bytes"],
             external_traffic_bytes=network_metrics["external_traffic_bytes"],
+            dns_response_time_avg=dns_avg,
         )
 
     def _save_top_talkers(self, top_talkers: list[dict]) -> None:

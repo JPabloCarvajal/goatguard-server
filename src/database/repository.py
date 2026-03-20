@@ -20,6 +20,12 @@ from src.database.models import (
     TopTalkerCurrent,
 )
 
+from src.database.models import (
+    EndpointSnapshot,
+    NetworkSnapshot,
+    TopTalker,
+    RecentConnection
+)
 logger = logging.getLogger(__name__)
 
 class Repository:
@@ -238,7 +244,8 @@ class Repository:
                                 new_connections_per_min: int,
                                 failed_connections_global: int,
                                 internal_traffic_bytes: int,
-                                external_traffic_bytes: int) -> None:
+                                external_traffic_bytes: int,
+                                dns_response_time_avg: float = None) -> None:
         """Update network-wide metrics via UPSERT."""
         session = self._get_session()
         try:
@@ -255,6 +262,8 @@ class Repository:
                 current.failed_connections_global = failed_connections_global
                 current.internal_traffic_bytes = internal_traffic_bytes
                 current.external_traffic_bytes = external_traffic_bytes
+                if dns_response_time_avg is not None:
+                    current.dns_response_time_avg = dns_response_time_avg
             else:
                 current = NetworkCurrentMetrics(
                     network_id=network_id,
@@ -264,6 +273,7 @@ class Repository:
                     failed_connections_global=failed_connections_global,
                     internal_traffic_bytes=internal_traffic_bytes,
                     external_traffic_bytes=external_traffic_bytes,
+                    dns_response_time_avg=dns_response_time_avg,
                 )
                 session.add(current)
 
@@ -503,3 +513,222 @@ class Repository:
             return 0
         finally:
             session.close()
+
+    def save_endpoint_snapshot(self, device_id: int, network_snapshot_id: int,
+                                metrics: dict) -> None:
+        """Save a historical snapshot of endpoint metrics.
+
+        Merges traffic metrics from Zeek analysis with system
+        metrics from UDP (CPU, RAM, disk) stored in
+        device_current_metrics.
+        """
+        session = self._get_session()
+        try:
+            # Read current system metrics from UDP data
+            current = session.query(DeviceCurrentMetrics).filter_by(
+                device_id=device_id
+            ).first()
+
+            snapshot = EndpointSnapshot(
+                device_id=device_id,
+                network_snapshot_id=network_snapshot_id,
+                timestamp=datetime.utcnow(),
+                # System metrics from UDP (device_current_metrics)
+                cpu_pct=current.cpu_pct if current else None,
+                ram_pct=current.ram_pct if current else None,
+                disk_usage_pct=current.disk_usage_pct if current else None,
+                link_speed=current.link_speed if current else None,
+                cpu_count=current.cpu_count if current else None,
+                ram_total_bytes=current.ram_total_bytes if current else None,
+                ram_available_bytes=current.ram_available_bytes if current else None,
+                uptime_seconds=current.uptime_seconds if current else None,
+                # Traffic metrics from Zeek analysis
+                bandwidth_in=metrics.get("bandwidth_in"),
+                bandwidth_out=metrics.get("bandwidth_out"),
+                tcp_retransmissions=metrics.get("tcp_retransmissions", 0),
+                failed_connections=metrics.get("failed_connections", 0),
+                unique_destinations=metrics.get("unique_destinations"),
+                bytes_ratio=metrics.get("bytes_ratio"),
+                dns_response_time=metrics.get("dns_response_time"),
+            )
+            session.add(snapshot)
+            session.commit()
+            logger.debug(f"Endpoint snapshot saved for device {device_id}")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to save endpoint snapshot: {e}")
+        finally:
+            session.close()
+    
+    def save_network_snapshot(self, network_id: int, metrics: dict) -> int:
+        """Save a historical snapshot of network-wide metrics.
+
+        Merges traffic metrics from Zeek analysis with ISP
+        metrics from the ISP Probe stored in
+        network_current_metrics.
+
+        Returns the snapshot ID for endpoint snapshot references.
+        """
+        session = self._get_session()
+        try:
+            # Read current ISP metrics from probe data
+            current = session.query(NetworkCurrentMetrics).filter_by(
+                network_id=network_id
+            ).first()
+
+            snapshot = NetworkSnapshot(
+                network_id=network_id,
+                timestamp=datetime.utcnow(),
+                # ISP metrics from probe (network_current_metrics)
+                isp_latency_avg=current.isp_latency_avg if current else None,
+                packet_loss_pct=current.packet_loss_pct if current else None,
+                jitter=current.jitter if current else None,
+                dns_response_time_avg=current.dns_response_time_avg if current else None,
+                # Traffic metrics from Zeek analysis
+                failed_connections_global=metrics.get("failed_connections_global", 0),
+                active_connections=metrics.get("active_connections"),
+                new_connections_per_min=metrics.get("new_connections_per_min"),
+                internal_traffic_bytes=metrics.get("internal_traffic_bytes"),
+                external_traffic_bytes=metrics.get("external_traffic_bytes"),
+            )
+            session.add(snapshot)
+            session.commit()
+            session.refresh(snapshot)
+
+            logger.debug(f"Network snapshot saved: id={snapshot.id}")
+            return snapshot.id
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to save network snapshot: {e}")
+            return -1
+        finally:
+            session.close()
+
+
+    def save_top_talker_snapshot(self, network_snapshot_id: int,
+                                  top_talkers: list[dict]) -> None:
+        """Save historical top talker ranking.
+
+        Args:
+            network_snapshot_id: The parent network snapshot.
+            top_talkers: List of talker dicts with ip, total, rank, is_hog.
+        """
+        session = self._get_session()
+        try:
+            for talker in top_talkers:
+                device = session.query(Device).filter_by(
+                    ip=talker["ip"]
+                ).first()
+
+                if device:
+                    entry = TopTalker(
+                        network_snapshot_id=network_snapshot_id,
+                        device_id=device.id,
+                        total_consumption=talker["total_consumption"],
+                        rank=talker["rank"],
+                        is_hog=talker["is_hog"],
+                    )
+                    session.add(entry)
+
+            session.commit()
+            logger.debug(f"Top talker snapshot saved: {len(top_talkers)} entries")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to save top talker snapshot: {e}")
+        finally:
+            session.close()
+
+    def save_recent_connections(self, connections: list[dict]) -> None:
+        """Save resolved external connections per device.
+
+        Replaces all existing entries each cycle. Groups connections
+        by (device_ip, dst_ip, dst_port, proto) and aggregates
+        bytes and connection count.
+
+        Args:
+            connections: Enriched connection dicts from the pipeline.
+        """
+        session = self._get_session()
+        try:
+            # Clear previous cycle
+            session.query(RecentConnection).delete()
+
+            # Group by device → destination
+            from collections import defaultdict
+            grouped = defaultdict(lambda: {
+                "total_bytes": 0,
+                "count": 0,
+                "dst_hostname": None,
+                "proto": "tcp",
+            })
+
+            for conn in connections:
+                src_ip = conn.get("src_ip")
+                dst_ip = conn.get("dst_ip")
+                dst_port = conn.get("dst_port", 0)
+                proto = conn.get("proto", "tcp")
+                dst_hostname = conn.get("dst_hostname")
+
+                if not src_ip or not dst_ip:
+                    continue
+
+                # Skip internal-only traffic
+                if self._is_local(src_ip) and self._is_local(dst_ip):
+                    continue
+
+                # Only track outbound from local devices
+                if not self._is_local(src_ip):
+                    continue
+
+                key = (src_ip, dst_ip, dst_port, proto)
+                grouped[key]["total_bytes"] += conn.get("orig_bytes", 0) + conn.get("resp_bytes", 0)
+                grouped[key]["count"] += 1
+                grouped[key]["proto"] = proto
+                if dst_hostname:
+                    grouped[key]["dst_hostname"] = dst_hostname
+
+            # Save grouped connections
+            for (src_ip, dst_ip, dst_port, proto), data in grouped.items():
+                device = session.query(Device).filter_by(ip=src_ip).first()
+                if not device:
+                    continue
+
+                entry = RecentConnection(
+                    device_id=device.id,
+                    dst_ip=dst_ip,
+                    dst_hostname=data["dst_hostname"],
+                    dst_port=dst_port,
+                    proto=data["proto"],
+                    total_bytes=data["total_bytes"],
+                    connection_count=data["count"],
+                    last_seen=datetime.utcnow(),
+                )
+                session.add(entry)
+
+            session.commit()
+            logger.debug(f"Recent connections saved: {len(grouped)} entries")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to save recent connections: {e}")
+        finally:
+            session.close()
+
+    @staticmethod
+    def _is_local(ip: str) -> bool:
+        """Check if IP is private (RFC 1918)."""
+        return (
+            ip.startswith("192.168.") or
+            ip.startswith("10.") or
+            ip.startswith("172.16.") or
+            ip.startswith("172.17.") or
+            ip.startswith("172.18.") or
+            ip.startswith("172.19.") or
+            ip.startswith("172.2") or
+            ip.startswith("172.30.") or
+            ip.startswith("172.31.") or
+            ip.startswith("fe80:")
+        )

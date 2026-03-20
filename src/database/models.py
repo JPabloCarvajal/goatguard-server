@@ -15,6 +15,20 @@ from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
+class RecentConnection(Base):
+    """External connections seen in the latest analysis cycle."""
+    __tablename__ = "recent_connection"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    device_id = Column(Integer, ForeignKey("device.id"), nullable=False)
+    dst_ip = Column(String(45), nullable=False)
+    dst_hostname = Column(String(255), nullable=True)
+    dst_port = Column(Integer, nullable=False)
+    proto = Column(String(10), nullable=False)
+    total_bytes = Column(BigInteger, nullable=False, default=0)
+    connection_count = Column(Integer, nullable=False, default=0)
+    last_seen = Column(DateTime, nullable=False, default=datetime.utcnow)
+    
 class Network(Base):
     """A monitored LAN segment."""
     __tablename__ = "network"
