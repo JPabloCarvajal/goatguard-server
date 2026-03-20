@@ -1,0 +1,7 @@
+# GOATGuard Server — dependencias completas para run.py
+# Incluye captura de red (scapy) y sondeo ISP (pythonping)
+# Requiere privilegios de red en el host
+
+-r requirements.txt
+scapy==2.7.0
+pythonping>=1.1.4
