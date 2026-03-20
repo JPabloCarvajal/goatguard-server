@@ -1,0 +1,18 @@
+# GOATGuard Server — dependencias de la API (run_api.py + Docker)
+# Versiones alineadas con el venv de desarrollo
+
+# API Framework
+fastapi==0.135.1
+uvicorn==0.42.0
+pydantic>=2.0
+
+# Base de datos
+sqlalchemy>=2.0
+psycopg2-binary==2.9.11
+
+# Autenticación
+bcrypt==5.0.0
+PyJWT==2.12.1
+
+# Configuración
+pyyaml>=6.0
