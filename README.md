@@ -1,6 +1,6 @@
 # GOATGuard Server
 
-Centralized collector and analysis backend for the GOATGuard network monitoring system. Receives captured traffic and system metrics from distributed agents, assembles PCAP files, processes them with Zeek for deep protocol inspection, calculates per-device and network-wide metrics, discovers network devices via ARP scanning, enriches device identity with OUI vendor lookup and reverse DNS, monitors ISP health via ICMP probing, exposes data through a REST API with JWT authentication and real-time WebSocket push, and persists everything in PostgreSQL.
+Centralized collector and analysis backend for the GOATGuard network monitoring system. Receives captured traffic and system metrics from distributed agents, assembles PCAP files, processes them with Zeek for deep protocol inspection, calculates per-device and network-wide metrics, discovers network devices via ARP scanning, enriches device identity with OUI vendor lookup and reverse DNS, monitors ISP health via ICMP probing, detects anomalies using adaptive EWMA baselines with Z-score classification, exposes data through a REST API with JWT authentication and real-time WebSocket push, and persists everything in PostgreSQL.
 
 ## Architecture
 
@@ -14,41 +14,44 @@ The server runs as two separate processes sharing PostgreSQL:
 ├─────────┤                  │           │          └──────┘        └─────┬───────┘
 │ Agent N │─────────────────►│ (thread   │                                │
 └─────────┘                  │  per      │                                ▼
-                             │  client)  │                         ┌────────────┐
-┌─────────┐  UDP (metrics)   │           │                         │ Log Parser │
-│ Agent 1 │─────────────────►├───────────┤                         └─────┬──────┘
+                             │  client)  │                         ┌─────────────┐
+┌─────────┐  UDP (metrics)   │           │                         │ Log Parser  │
+│ Agent 1 │─────────────────►├───────────┤                         └─────┬───────┘
 ├─────────┤                  │   UDP     │                               │
 │ Agent 2 │─────────────────►│ Receiver  │                               ▼
-├─────────┤                  │           │                         ┌────────────┐
-│ Agent N │─────────────────►│           │                         │  Metrics   │
-└─────────┘                  └─────┬─────┘                         │ Calculator │
-                                   │                               └─────┬──────┘
+├─────────┤                  │           │                         ┌─────────────┐
+│ Agent N │─────────────────►│           │                         │  Metrics    │
+└─────────┘                  └─────┬─────┘                         │ Calculator  │
+                                   │                               └─────┬───────┘
   ┌──────────────────┐             │                                     │
-  │  ISP Probe       │─► ICMP      │                                     │
-  │  Health Checker  │─► HB        │                                     ▼
-  │  ARP Scanner     │─► L2        │                               ┌──────────┐
-  │  IP Enrichment   │─► OUI/DNS   │         writes                │Repository│
-  └────────┬─────────┘             ▼        ────────►              └────┬─────┘
-           │                ┌──────────┐                                │
-           └───────────────►│PostgreSQL│◄───────────────────────────────┘
+  │  ISP Probe       │─► ICMP     │                                     ▼
+  │  Health Checker  │─► HB       │                               ┌──────────┐
+  │  ARP Scanner     │─► L2       │         writes                │Repository│
+  │  IP Enrichment   │─► OUI/DNS  │        ────────►              └────┬─────┘
+  └────────┬─────────┘            ▼                                    │
+           │                ┌──────────┐                               │
+           └───────────────►│PostgreSQL│◄──────────────────────────────┘
                             │   :5432  │
-                            └────┬─────┘
-                                 │ reads
-                                 ▼
-                            ┌──────────────┐
-                            │  FastAPI      │
-                            │  REST + WS    │
-                            │  JWT Auth     │
-                            │  :8000        │
-                            └──────┬───────┘
-                                   │
-                            ┌──────▼───────┐
-                            │  Mobile App   │
-                            │  (Flutter)    │
-                            └──────────────┘
+  ┌──────────────────┐      └────┬─────┘
+  │ Detection Engine │           │
+  │  EWMA + Z-Score  │◄──reads───┘
+  │  Alert Manager   │───writes──►
+  │  Insight Gen.    │───push────►─────────┐
+  └──────────────────┘                     │
+                                 ┌─────────▼────┐
+                                 │  FastAPI     │
+                            ┌───►│  REST + WS   │
+                            │    │  JWT Auth    │
+                            │    │  :8000       │
+                            │    └──────┬───────┘
+                         reads          │
+                            │    ┌──────▼───────┐
+                            └────│  Mobile App  │
+                                 │  (Flutter)   │
+                                 └──────────────┘
 
   Process 1: python run.py          Process 2: python run_api.py
-  (pipeline + monitors)             (API + WebSocket)
+  (pipeline + monitors + detection)  (API + WebSocket)
 ```
 
 ## Requirements
@@ -61,7 +64,7 @@ The server runs as two separate processes sharing PostgreSQL:
 - Npcap installed (for ARP scanning): https://npcap.com
 - Run terminal as Administrator (ARP and ICMP require elevated privileges)
 
-### Linux (Ubuntu/Debian/Idk if fedora works with dnf packages commands "not tested xd")
+### Linux (Ubuntu/Debian)
 - libpcap-dev: `sudo apt install libpcap-dev`
 - Root privileges required for ARP scanning and ICMP probing
 
@@ -131,7 +134,7 @@ Two terminals, two processes:
 
 ### Windows (PowerShell as Administrator)
 ```powershell
-# Terminal 1: Pipeline
+# Terminal 1: Pipeline + detection engine
 python run.py
 
 # Terminal 2: API
@@ -142,7 +145,7 @@ python run_api.py
 ```bash
 source .venv/bin/activate
 
-# Terminal 1: Pipeline (sudo for ARP + ICMP)
+# Terminal 1: Pipeline + detection engine (sudo for ARP + ICMP)
 sudo .venv/bin/python3 run.py
 
 # Terminal 2: API (no sudo needed)
@@ -155,19 +158,58 @@ Swagger docs: http://localhost:8000/docs
 
 All endpoints except auth require `Authorization: Bearer <token>`.
 
+### Authentication
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | POST | /auth/register | Create admin account, returns JWT |
 | POST | /auth/login | Login, returns JWT |
+
+### Dashboard
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| GET | /dashboard/summary | System overview: status, device counts, ISP health, top consumer |
+
+### Devices
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | GET | /devices/ | List all devices |
-| GET | /devices/{id} | Device detail with metrics |
-| PATCH | /devices/{id}/alias | Update device alias |
+| GET | /devices/{id} | Device detail with current metrics |
+| GET | /devices/{id}/history?hours=4 | Historical metrics for trend graphs |
+| GET | /devices/{id}/connections | External connections with resolved hostnames |
+| GET | /devices/comparison?metric=bandwidth_in | Compare all devices by a metric |
+| PATCH | /devices/{id}/alias | Update device display name |
+
+### Network
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | GET | /network/metrics | Network health + ISP status |
-| GET | /network/top-talkers | Bandwidth ranking |
+| GET | /network/top-talkers | Bandwidth consumption ranking |
+| GET | /network/history?hours=4 | Historical network metrics |
+| GET | /network/top-talkers/history?hours=4 | Historical bandwidth rankings |
+| GET | /network/traffic-distribution | Traffic breakdown by protocol, port, direction |
+| GET | /network/isp-health | Detailed ISP health with 1h stats and status classification |
+
+### Alerts
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
 | GET | /alerts/ | List alerts (filters: seen, severity) |
 | GET | /alerts/count | Unseen + total count |
 | PATCH | /alerts/{id}/seen | Mark alert as read |
-| WS | /ws?token=JWT | Real-time push (every 5s) |
+
+### WebSocket
+
+| Protocol | Endpoint | Description |
+|----------|----------|-------------|
+| WS | /ws?token=JWT | Real-time push: periodic state updates + instant alert notifications |
+
+WebSocket message types:
+- `state_update` — every 5s: network metrics, device summaries, unseen alert count
+- `alert_created` — instant: anomaly detected with severity and insight text
 
 ## Project Structure
 
@@ -193,6 +235,12 @@ goatguard-server/
 │   ├── discovery/
 │   │   ├── arp_scanner.py         # ARP LAN enumeration
 │   │   └── enrichment.py          # OUI vendor + reverse DNS
+│   ├── detection/                 # Anomaly detection engine
+│   │   ├── baseline.py            # EWMA + EWMV adaptive baseline (Strategy)
+│   │   ├── anomaly_detector.py    # Per-device and network detectors
+│   │   ├── insight_generator.py   # Z-score to human-readable text
+│   │   ├── alert_manager.py       # Alert persistence + deduplication
+│   │   └── engine.py              # Detection orchestrator (Mediator)
 │   ├── database/
 │   │   ├── connection.py          # SQLAlchemy engine + sessions
 │   │   ├── models.py              # ORM table definitions
@@ -201,16 +249,17 @@ goatguard-server/
 │       ├── app.py                 # FastAPI factory
 │       ├── auth.py                # JWT + bcrypt
 │       ├── dependencies.py        # DB session + auth injection
-│       ├── websocket.py           # Connection manager + broadcast
+│       ├── websocket.py           # Connection manager + broadcast + alert queue
 │       └── routes/
-│           ├── auth.py            # /auth/register, /auth/login
+│           ├── auth.py            # /auth/*
+│           ├── dashboard.py       # /dashboard/*
 │           ├── devices.py         # /devices/*
 │           ├── network.py         # /network/*
 │           └── alerts.py          # /alerts/*
 ├── tests/
 ├── docker-compose.yml             # PostgreSQL 15
-├── run.py                         # Entry point: pipeline
-├── run_api.py                     # Entry point: API
+├── run.py                         # Entry point: pipeline + detection
+├── run_api.py                     # Entry point: API + WebSocket
 ├── .env.example                   # Production secrets template
 └── .github/workflows/ci.yml      # Lint + tests + PostgreSQL
 ```
@@ -221,7 +270,10 @@ goatguard-server/
 ```
 Agent -> sanitize -> TCP -> Receiver -> PCAP Assembler -> rotate every 30s
   -> Zeek (Docker) -> Log Parser -> Enrichment (reverse DNS)
-  -> Metrics Calculator -> Repository -> PostgreSQL -> WebSocket push
+  -> Metrics Calculator -> Repository -> PostgreSQL
+  -> Historical Snapshots (endpoint + network + top talkers)
+  -> Recent Connections (grouped by destination with resolved hostnames)
+  -> WebSocket push
 ```
 
 ### System Metrics (UDP)
@@ -233,10 +285,37 @@ Agent -> JSON -> UDP -> Receiver -> route by "type" field
 
 ### Discovery + Monitoring
 ```
-ARP Scanner (60s)  -> discover devices -> register with OUI vendor
-ISP Probe (30s)    -> ping 8.8.8.8 -> latency, loss, jitter
+ARP Scanner (60s)   -> discover devices -> register with OUI vendor
+ISP Probe (30s)     -> ping 8.8.8.8 -> latency, loss, jitter
 Health Checker (30s) -> heartbeat timeout -> mark disconnected/active
 ```
+
+### Anomaly Detection
+```
+Every 30s:
+  -> Detection Engine reads current metrics from PostgreSQL
+  -> Per-device EWMA baselines calculate Z-scores
+  -> Persistence filter: 2 consecutive cycles above threshold required
+  -> Alert Manager generates insight text + saves to DB
+  -> Instant push via WebSocket alert_queue -> mobile app
+```
+
+## Anomaly Detection
+
+The detection engine uses EWMA (Exponentially Weighted Moving Average) with adaptive Z-score thresholds instead of fixed thresholds. Each metric of each device maintains its own baseline that adapts over time.
+
+Detection parameters:
+- Alpha: 0.10 (baseline memory ~22 minutes)
+- Warm-up: 30 cycles (15 minutes before generating alerts)
+- Persistence filter: 2/2 consecutive cycles required (95.4% false positive reduction)
+
+Severity classification:
+- WARNING: |Z| > 2.0 sustained (4.56% normal probability)
+- CRITICAL: |Z| > 3.0 sustained (0.27% normal probability)
+
+Monitored metrics per device: cpu_pct, ram_pct, bandwidth_in, bandwidth_out, tcp_retransmissions, failed_connections, unique_destinations, bytes_ratio, dns_response_time.
+
+Monitored network metrics: isp_latency_avg, packet_loss_pct, jitter.
 
 ## Database
 
@@ -256,6 +335,9 @@ docker exec -it goatguard-db psql -U goatguard -c \
 
 docker exec -it goatguard-db psql -U goatguard -c \
   "SELECT isp_latency_avg, packet_loss_pct, jitter, active_connections FROM network_current_metrics;"
+
+docker exec -it goatguard-db psql -U goatguard -c \
+  "SELECT id, anomaly_type, severity, substring(description, 1, 80) as insight FROM alert ORDER BY id DESC LIMIT 10;"
 ```
 
 ## Development
@@ -286,9 +368,9 @@ Git workflow: `main` (stable, protected) <- PR <- `develop` (integration) <- `fe
 - [x] Sprint 5: ISP Probe + Health Checker
 - [x] Sprint 6: ARP Discovery + IP Enrichment
 - [x] Sprint 7: REST API + WebSocket + JWT Auth
-- [ ] Sprint 8: Historical Snapshots
-- [ ] Sprint 9: Feature Extractor + ML Classifier (Random Forest)
-- [ ] Sprint 10: Alert Manager + Insight Generator
+- [x] Sprint 8: Historical Snapshots + Dashboard + Device Connections + Traffic Distribution
+- [x] Sprint 9: EWMA Anomaly Detection Engine + Alert Manager + Insight Generator
+- [ ] Sprint 10: CD pipeline + Dockerfile
 
 ## CI/CD
 
