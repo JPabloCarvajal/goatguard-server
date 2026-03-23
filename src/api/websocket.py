@@ -27,6 +27,10 @@ from fastapi import WebSocket, WebSocketDisconnect, APIRouter
 
 from src.api.auth import verify_token
 
+# Queue for alerts from the detection engine (sync → async bridge)
+import queue
+
+alert_queue: queue.Queue = queue.Queue()
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
@@ -191,7 +195,18 @@ async def broadcast_loop(get_session) -> None:
                 "devices": device_list,
                 "unseen_alerts": unseen,
             }
-
+            # Push any pending alerts from the detection engine
+            while not alert_queue.empty():
+                try:
+                    alert_data = alert_queue.get_nowait()
+                    alert_msg = {
+                        "type": "alert_created",
+                        "alert": alert_data,
+                    }
+                    await manager.broadcast(alert_msg)
+                except Exception:
+                    break
+                
             await manager.broadcast(message)
 
         except Exception as e:

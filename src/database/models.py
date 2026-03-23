@@ -24,7 +24,7 @@ class RecentConnection(Base):
     dst_ip = Column(String(45), nullable=False)
     dst_hostname = Column(String(255), nullable=True)
     dst_port = Column(Integer, nullable=False)
-    proto = Column(String(10), nullable=False)
+    proto = Column(String(50), nullable=False)
     total_bytes = Column(BigInteger, nullable=False, default=0)
     connection_count = Column(Integer, nullable=False, default=0)
     last_seen = Column(DateTime, nullable=False, default=datetime.utcnow)

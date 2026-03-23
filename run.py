@@ -19,6 +19,8 @@ from src.monitoring.health_checker import HealthChecker
 from src.monitoring.isp_probe import IspProbe
 from src.discovery.arp_scanner import ArpScanner
 import threading
+from src.detection.engine import DetectionEngine
+from src.api.websocket import alert_queue
 
 logging.basicConfig(
     level=logging.INFO,
@@ -61,6 +63,20 @@ def main():
         ping_count=10,
     )
     isp_probe.start()
+
+    def push_alert(alert_data: dict) -> None:
+        """Bridge: sync detection engine → async WebSocket."""
+        alert_queue.put(alert_data)
+
+    detection_engine = DetectionEngine(
+        repository=repo,
+        network_id=network_id,
+        alpha=0.10,
+        min_samples=5,
+        check_interval=30,
+        on_alert=push_alert,
+    )
+    detection_engine.start()
 
     arp_scanner = ArpScanner(
         repository=repo,
@@ -131,6 +147,7 @@ def main():
         udp_receiver.stop()
         health_checker.stop()
         isp_probe.stop()
+        detection_engine.stop()
         assembler.close()
 
 
