@@ -15,7 +15,6 @@ runs inside each baseline, only asks for a Z-score.
 """
 
 import logging
-from typing import Optional
 from src.detection.baseline import MetricBaseline
 
 logger = logging.getLogger(__name__)
