@@ -344,7 +344,7 @@ docker exec -it goatguard-db psql -U goatguard -c \
 
 ### Windows
 ```powershell
-pip install pytest ruff
+pip install pytest ruff pytest-html httpx
 python -m ruff check src/
 python -m pytest tests/ -v
 ```
@@ -352,9 +352,20 @@ python -m pytest tests/ -v
 ### Linux
 ```bash
 source .venv/bin/activate
-pip install pytest ruff
+pip install pytest ruff pytest-html httpx
 python -m ruff check src/
 python -m pytest tests/ -v
+```
+
+### Test Report
+```bash
+python -m pytest tests/ -v --html=test_report.html --self-contained-html
+```
+
+### Infrastructure Monitoring
+```bash
+pip install glances[web]
+python -m glances -w          # http://localhost:61208
 ```
 
 Git workflow: `main` (stable, protected) <- PR <- `develop` (integration) <- `feature/*`
