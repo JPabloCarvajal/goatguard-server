@@ -3,10 +3,9 @@ import sys
 sys.path.insert(0, ".")
 
 import time
-import json
 from datetime import datetime
 from src.detection.baseline import MetricBaseline
-from src.detection.anomaly_detector import DeviceDetector, NetworkDetector, AnomalyResult
+from src.detection.anomaly_detector import DeviceDetector, AnomalyResult
 from src.detection.insight_generator import generate_device_insight, _z_to_probability
 from src.api.auth import init_auth, hash_password, verify_password, create_token, verify_token
 
@@ -413,12 +412,12 @@ def generate_html(results: dict) -> str:
 """
 
     for section in results["sections"]:
-        html += f'    <div class="section">\n'
+        html += '    <div class="section">\n'
         html += f'        <div class="section-header">{section["name"]}</div>\n'
 
         for test in section["tests"]:
             badge_class = "pass" if test.get("result") == "PASS" else "fail"
-            html += f'        <div class="test">\n'
+            html += '        <div class="test">\n'
             html += f'            <div class="test-name"><span class="badge {badge_class}">{test["result"]}</span> {test["name"]}</div>\n'
 
             if "description" in test:

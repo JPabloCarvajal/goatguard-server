@@ -6,14 +6,13 @@ import math
 from src.detection.baseline import MetricBaseline
 from src.detection.anomaly_detector import DeviceDetector, NetworkDetector
 from src.detection.insight_generator import (
-    generate_device_insight, generate_event_insight,
+    generate_event_insight,
     _format_value, _z_to_probability,
 )
-from src.detection.anomaly_detector import AnomalyResult
 from src.config.models import (
-    ServerConfig, NetworkConfig, DatabaseConfig, SecurityConfig,
+    ServerConfig,
 )
-from src.api.auth import init_auth, hash_password, verify_password, create_token, verify_token
+from src.api.auth import init_auth, hash_password, verify_password, verify_token
 
 
 class TestBaselineBoundaryValues:

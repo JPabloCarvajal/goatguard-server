@@ -2,7 +2,6 @@
 import sys
 sys.path.insert(0, ".")
 
-import math
 from src.detection.anomaly_detector import AnomalyResult
 from src.detection.insight_generator import (
     generate_device_insight,

@@ -4,7 +4,7 @@ sys.path.insert(0, ".")
 
 import time
 from src.detection.baseline import MetricBaseline
-from src.detection.anomaly_detector import DeviceDetector, NetworkDetector
+from src.detection.anomaly_detector import DeviceDetector
 from src.detection.insight_generator import generate_device_insight
 from src.detection.anomaly_detector import AnomalyResult
 from src.api.auth import init_auth, hash_password, create_token, verify_token
