@@ -2,7 +2,6 @@
 import sys
 sys.path.insert(0, ".")
 
-import time
 from src.api.auth import (
     init_auth, hash_password, verify_password,
     create_token, verify_token,

@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, ".")
 
 from src.detection.anomaly_detector import (
-    DeviceDetector, NetworkDetector, METRIC_CONFIG, NETWORK_METRIC_CONFIG,
+    DeviceDetector, NetworkDetector, METRIC_CONFIG
 )
 
 
