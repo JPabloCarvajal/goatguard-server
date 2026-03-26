@@ -1,5 +1,5 @@
-# GOATGuard Server — dependencias de la API (run_api.py + Docker)
-# Versiones alineadas con el venv de desarrollo
+# GOATGuard Server — dependencias completas
+# API + Pipeline + Detection
 
 # API Framework
 fastapi==0.135.1
@@ -16,3 +16,11 @@ PyJWT==2.12.1
 
 # Configuración
 pyyaml>=6.0
+
+# Captura y análisis de red (pipeline)
+scapy>=2.5
+pythonping>=1.1
+mac-vendor-lookup>=0.2
+
+# WebSocket
+websockets>=11.0

@@ -1,7 +1,8 @@
 # GOATGuard Server — dependencias de CI y desarrollo local
-# Lint + tests (sin scapy ni pythonping)
+# Lint + tests 
 
 -r requirements.txt
 ruff>=0.4.0
 pytest>=7.0
 pytest-cov>=4.0
+httpx>=0.24.0
