@@ -20,7 +20,7 @@ pyyaml>=6.0
 # Captura y análisis de red (pipeline)
 scapy>=2.5
 pythonping>=1.1
-mac-vendor-lookup>=0.2
+mac-vendor-lookup>=0.1
 
 # WebSocket
 websockets>=11.0
