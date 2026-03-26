@@ -121,6 +121,7 @@ class TestMetricBaselineDetection:
         for _ in range(3):
             baseline.update(10.0)
 
+
         z = baseline.update(50.0)
 
         # Z should be calculated against baseline ~10, not updated baseline ~14
