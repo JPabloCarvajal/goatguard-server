@@ -26,6 +26,7 @@ import asyncio
 from src.api.websocket import router as ws_router
 from src.api.websocket import broadcast_loop
 from src.api.routes import dashboard as dashboard_routes
+from src.api.routes import agents as agent_routes
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,8 @@ def create_app(database: Database, config) -> FastAPI:
     app.include_router(alert_routes.router)
 
     app.include_router(dashboard_routes.router)
-    
+    app.include_router(agent_routes.router)
+
     app.include_router(ws_router)
     @app.on_event("startup")
     async def start_broadcast():
