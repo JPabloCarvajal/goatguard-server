@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session, joinedload
 from typing import Optional, List
 
 from src.api.dependencies import get_db, get_current_user
-from src.database.models import User, Agent, Device
+from src.database.models import User, Agent
 
 logger = logging.getLogger(__name__)
 

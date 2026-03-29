@@ -16,7 +16,6 @@ Edge case adicional:
 import sys
 sys.path.insert(0, ".")
 
-import pytest
 from src.api.auth import create_token
 
 
