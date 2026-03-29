@@ -132,6 +132,7 @@ def _apply_env_overrides(config: ServerConfig) -> None:
         "GOATGUARD_DB_USER": lambda v: setattr(config.database, "user", v),
         "GOATGUARD_DB_PASSWORD": lambda v: setattr(config.database, "password", v),
         "GOATGUARD_JWT_SECRET": lambda v: setattr(config.security, "jwt_secret", v),
+        "GOATGUARD_FERNET_KEY": lambda v: setattr(config.security, "fernet_key", v),
     }
 
     for env_var, setter in env_map.items():

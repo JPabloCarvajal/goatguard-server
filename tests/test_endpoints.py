@@ -7,22 +7,29 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
+from cryptography.fernet import Fernet
+
+from datetime import datetime, timedelta, timezone
+from sqlalchemy.pool import StaticPool
+
 from src.database.models import (
     Base, Device, Network, NetworkCurrentMetrics,
-    DeviceCurrentMetrics, 
+    DeviceCurrentMetrics, User, InvitationToken,
 )
 from src.api.dependencies import get_db
 from src.api.app import create_app
+from src.api.auth import hash_password, create_token
+from src.api.registration_utils import generate_invitation_token, hash_invitation_token
 from src.config.models import ServerConfig, SecurityConfig
-from datetime import datetime
 
-TEST_DATABASE_URL = "sqlite:///./test_goatguard.db"
+TEST_FERNET_KEY = Fernet.generate_key().decode()
+TEST_DATABASE_URL = "sqlite:///:memory:"
 
 
 @pytest.fixture(scope="module")
 def test_app():
     """Create a test app with SQLite database."""
-    engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False})
+    engine = create_engine(TEST_DATABASE_URL, connect_args={"check_same_thread": False}, poolclass=StaticPool)
     Base.metadata.create_all(bind=engine)
     TestSession = sessionmaker(bind=engine, expire_on_commit=False)
 
@@ -39,6 +46,8 @@ def test_app():
         jwt_secret="test-secret-for-endpoint-testing-goatguard",
         jwt_algorithm="HS256",
         jwt_expiration_hours=24,
+        fernet_key=TEST_FERNET_KEY,
+        hibp_check_enabled=False,
     )
 
     # Create app with required arguments
@@ -105,78 +114,68 @@ def test_app():
     # Cleanup
     Base.metadata.drop_all(bind=engine)
     engine.dispose()
-    import os
-    try:
-        os.remove("test_goatguard.db")
-    except OSError:
-        pass
 
 
 @pytest.fixture(scope="module")
 def auth_token(test_app):
-    """Login or register a user and return a valid JWT token."""
-    client = test_app["client"]
-
-    # Try login first (user might exist from test_register)
-    response = client.post("/auth/login", json={
-        "username": "testadmin",
-        "password": "testpassword123",
-    })
-
-    if response.status_code == 200:
-        return response.json()["access_token"]
-
-    # If login fails, register
-    response = client.post("/auth/register", json={
-        "username": "testadmin",
-        "password": "testpassword123",
-    })
-
-    assert response.status_code in (200, 201), f"Register failed: {response.text}"
-    return response.json()["access_token"]
+    """Crea un admin directamente en BD y retorna JWT scope=full_access."""
+    session = test_app["SessionLocal"]()
+    user = session.query(User).filter_by(username="testadmin").first()
+    if not user:
+        user = User(
+            username="testadmin",
+            password_hash=hash_password("TestPassword2025!!"),
+            totp_enabled=False,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+    session.close()
+    return create_token(user.id, user.username, scope="full_access")
 
 
 class TestAuthEndpoints:
     """Tests for /auth/* endpoints."""
 
-    def test_register_returns_token(self, test_app):
+    def test_register_requires_invitation_token(self, test_app):
+        """Registro sin invitation_token → 422."""
         client = test_app["client"]
+        response = client.post("/auth/register", json={
+            "username": "newuser",
+            "password": "ValidPassword2025!!",
+        })
+        assert response.status_code == 422
+
+    def test_register_with_valid_token(self, test_app):
+        """Registro con invitation token válido → 201."""
+        client = test_app["client"]
+        session = test_app["SessionLocal"]()
+        token = generate_invitation_token()
+        inv = InvitationToken(
+            token_hash=hash_invitation_token(token),
+            expires_at=datetime.now(timezone.utc) + timedelta(hours=24),
+        )
+        session.add(inv)
+        session.commit()
+        session.close()
 
         response = client.post("/auth/register", json={
             "username": "newuser",
-            "password": "password123",
+            "password": "ValidPassword2025!!",
+            "invitation_token": token,
         })
-
-        assert response.status_code in (200, 201)
+        assert response.status_code == 201
         data = response.json()
         assert "access_token" in data
-        assert data["token_type"] == "bearer"
-
-    def test_register_duplicate_username(self, test_app):
-        client = test_app["client"]
-
-        # First registration
-        client.post("/auth/register", json={
-            "username": "duplicate",
-            "password": "pass123",
-        })
-
-        # Second with same username
-        response = client.post("/auth/register", json={
-            "username": "duplicate",
-            "password": "pass456",
-        })
-
-        assert response.status_code in (400, 409)
+        assert "recovery_code" in data
 
     def test_login_valid_credentials(self, test_app, auth_token):
+        """Login con credenciales correctas → 200."""
         client = test_app["client"]
-
         response = client.post("/auth/login", json={
             "username": "testadmin",
-            "password": "testpassword123",
+            "password": "TestPassword2025!!",
         })
-
         assert response.status_code == 200
         assert "access_token" in response.json()
 

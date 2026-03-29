@@ -20,29 +20,36 @@ from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
 
+from datetime import datetime, timezone
+
 from src.api.auth import verify_token
 from src.database.models import User
 
 logger = logging.getLogger(__name__)
 
-# Will be set during app startup via set_database()
+# Will be set during app startup via set_database() / set_security_config()
 _database = None
+_security_config = None
 
 # Tells FastAPI to expect "Authorization: Bearer <token>" header
 security_scheme = HTTPBearer()
 
 
 def set_database(database) -> None:
-    """Set the database instance for dependency injection.
-
-    Called once during API startup. Dependencies use this
-    instance to create sessions for each request.
-
-    Args:
-        database: Database instance from connection.py
-    """
+    """Set the database instance for dependency injection."""
     global _database
     _database = database
+
+
+def set_security_config(security_config) -> None:
+    """Set security config para acceso a fernet_key desde endpoints."""
+    global _security_config
+    _security_config = security_config
+
+
+def get_security_config():
+    """Retorna SecurityConfig inyectado en startup."""
+    return _security_config
 
 def get_db() -> Generator[Session, None, None]:
     """Provide a database session for a single request.
@@ -66,34 +73,11 @@ def get_db() -> Generator[Session, None, None]:
     finally:
         session.close()
 
-def get_current_user(
+def _resolve_user_from_token(
     credentials: HTTPAuthorizationCredentials = Depends(security_scheme),
     db: Session = Depends(get_db),
 ) -> User:
-    """Verify JWT token and return the authenticated user.
-
-    This dependency chains two others:
-    1. security_scheme extracts the Bearer token from the header
-    2. get_db provides a database session
-
-    If the token is missing, expired, or invalid, raises 401.
-    If the user ID in the token doesn't exist in the DB, raises 401.
-
-    Usage in an endpoint:
-        @router.get("/devices")
-        def list_devices(user: User = Depends(get_current_user)):
-            # 'user' is guaranteed to be authenticated here
-
-    Args:
-        credentials: Bearer token extracted by HTTPBearer.
-        db: Database session from get_db.
-
-    Returns:
-        The authenticated User object from the database.
-
-    Raises:
-        HTTPException 401 if authentication fails.
-    """
+    """Verifica JWT y retorna User. Uso interno — NO usar en endpoints directamente."""
     payload = verify_token(credentials.credentials)
 
     if payload is None:
@@ -111,4 +95,36 @@ def get_current_user(
             detail="User not found",
         )
 
+    # Invalidar tokens emitidos antes de un cambio de contraseña [Security Fix #5]
+    if user.password_changed_at and payload.get("iat"):
+        token_iat = datetime.fromtimestamp(payload["iat"], tz=timezone.utc)
+        if token_iat < user.password_changed_at.replace(tzinfo=timezone.utc):
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="Token invalidado por cambio de contraseña",
+            )
+
+    # Adjuntar scope como atributo transitorio para evitar doble decode JWT
+    user._token_scope = payload.get("scope", "full_access")
+
+    return user
+
+
+# Alias público para backward-compat en conftest.py y endpoints TOTP
+get_current_user = _resolve_user_from_token
+
+
+def get_current_user_totp_verified(
+    user: User = Depends(_resolve_user_from_token),
+) -> User:
+    """Dependencia para endpoints protegidos — requiere scope=full_access [RF-13].
+
+    Rechaza tokens scope=pending_totp con HTTP 403.
+    Usar esta dependencia en TODOS los endpoints de datos.
+    """
+    if getattr(user, "_token_scope", "full_access") != "full_access":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Se requiere verificación de segundo factor (TOTP)",
+        )
     return user

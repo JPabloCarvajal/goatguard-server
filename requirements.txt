@@ -24,3 +24,17 @@ mac-vendor-lookup>=0.1
 
 # WebSocket
 websockets>=11.0
+
+# TOTP / 2FA [RF-13]
+pyotp==2.9.0
+qrcode[pil]==8.2
+cryptography==45.0.3
+
+# Migraciones de BD
+alembic>=1.13.0
+
+# Validación HIBP + testing HTTP
+httpx>=0.27.0
+
+# Rate limiting
+slowapi>=0.1.9

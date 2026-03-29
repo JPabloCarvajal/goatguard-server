@@ -16,16 +16,17 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.auth import init_auth
-from src.api.dependencies import set_database
+from src.api.dependencies import set_database, set_security_config
 from src.api.routes import auth as auth_routes
 from src.database.connection import Database
 from src.api.routes import devices as device_routes
 from src.api.routes import network as network_routes
 from src.api.routes import alerts as alert_routes
 import asyncio
+from src.api.routes import agents as agent_routes
+from src.api.routes import dashboard as dashboard_routes
 from src.api.websocket import router as ws_router
 from src.api.websocket import broadcast_loop
-from src.api.routes import dashboard as dashboard_routes
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +53,7 @@ def create_app(database: Database, config) -> FastAPI:
 
     # Initialize shared modules
     set_database(database)
+    set_security_config(config.security)
     init_auth(
         jwt_secret=config.security.jwt_secret,
         jwt_algorithm=config.security.jwt_algorithm,
@@ -71,14 +73,14 @@ def create_app(database: Database, config) -> FastAPI:
 
     # Register route modules
     app.include_router(auth_routes.router)
-
-    app.include_router(auth_routes.router)
     app.include_router(device_routes.router)
     app.include_router(network_routes.router)
     app.include_router(alert_routes.router)
+    app.include_router(agent_routes.router)
 
     app.include_router(dashboard_routes.router)
-    
+    app.include_router(agent_routes.router)
+
     app.include_router(ws_router)
     @app.on_event("startup")
     async def start_broadcast():

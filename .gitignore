@@ -39,3 +39,4 @@ pgdata/
 
 # ML models (too large for git)
 models/*.pkl
+.fernet_key

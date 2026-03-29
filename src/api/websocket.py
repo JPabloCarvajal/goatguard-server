@@ -25,7 +25,7 @@ from typing import Set
 
 from fastapi import WebSocket, WebSocketDisconnect, APIRouter
 
-from src.api.auth import verify_token
+from src.api.auth import verify_token_scope
 
 # Queue for alerts from the detection engine (sync → async bridge)
 import queue
@@ -101,9 +101,9 @@ async def websocket_endpoint(websocket: WebSocket):
         await websocket.close(code=4001, reason="Missing token")
         return
 
-    payload = verify_token(token)
+    payload = verify_token_scope(token, "full_access")
     if payload is None:
-        await websocket.close(code=4003, reason="Invalid or expired token")
+        await websocket.close(code=4003, reason="Invalid token or TOTP not verified")
         return
 
     # Connection authenticated — accept and manage

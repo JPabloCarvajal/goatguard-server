@@ -14,7 +14,7 @@ from pydantic import BaseModel
 from sqlalchemy.orm import Session
 from typing import Optional, List
 
-from src.api.dependencies import get_db, get_current_user
+from src.api.dependencies import get_db, get_current_user_totp_verified
 from src.database.models import User, Alert, Device
 
 logger = logging.getLogger(__name__)
@@ -47,7 +47,7 @@ def list_alerts(
     severity: Optional[str] = None,
     limit: int = 50,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_totp_verified),
 ):
     """List alerts ordered by most recent first.
 
@@ -87,7 +87,7 @@ def list_alerts(
 @router.get("/count", response_model=AlertCountResponse)
 def get_alert_counts(
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_totp_verified),
 ):
     """Get counts of unseen and total alerts.
 
@@ -106,7 +106,7 @@ def get_alert_counts(
 def mark_alert_seen(
     alert_id: int,
     db: Session = Depends(get_db),
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_totp_verified),
 ):
     """Mark an alert as seen by the administrator.
 

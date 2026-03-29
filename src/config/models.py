@@ -19,6 +19,8 @@ class SecurityConfig:
     jwt_secret: str = "goatguard-dev-secret-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24
+    fernet_key: str = ""  # Cifrado TOTP secrets — generar con Fernet.generate_key()
+    hibp_check_enabled: bool = True
 
 @dataclass
 class NetworkConfig:

@@ -15,7 +15,7 @@ its own proof of authenticity (a cryptographic signature).
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
@@ -89,33 +89,24 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     )
 
 
-def create_token(user_id: int, username: str) -> str:
-    """Create a signed JWT token.
+def create_token(
+    user_id: int,
+    username: str,
+    scope: str = "full_access",
+    expiration_minutes: Optional[int] = None,
+) -> str:
+    """Crea JWT con scope explícito [RF-13].
 
-    The token payload contains:
-        sub: user ID (who this token belongs to)
-        username: for display in the app
-        exp: expiration timestamp (24 hours from now)
-        iat: issued-at timestamp
-
-    The token has three parts separated by dots: header.payload.signature
-    Anyone can READ the payload (base64, not encrypted).
-    But only the server can CREATE a valid signature because only
-    the server knows the secret key.
-
-    Args:
-        user_id: The authenticated user's database ID.
-        username: The user's display name.
-
-    Returns:
-        Signed JWT token as a string.
+    Scopes válidos: "full_access", "pending_totp", "password_reset"
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
+    exp_minutes = expiration_minutes or (_jwt_expiration_hours * 60)
     payload = {
         "sub": str(user_id),
         "username": username,
-        "exp": now + timedelta(hours=_jwt_expiration_hours),
+        "scope": scope,
         "iat": now,
+        "exp": now + timedelta(minutes=exp_minutes),
     }
     return jwt.encode(payload, _jwt_secret, algorithm=_jwt_algorithm)
 
@@ -144,3 +135,16 @@ def verify_token(token: str) -> Optional[dict]:
     except jwt.InvalidTokenError as e:
         logger.debug(f"Invalid token: {e}")
         return None
+
+
+def verify_token_scope(token: str, required_scope: str) -> Optional[dict]:
+    """
+    Verifica token JWT y que tenga el scope requerido.
+    Retorna payload si válido, None si inválido o scope incorrecto.
+    """
+    payload = verify_token(token)
+    if not payload:
+        return None
+    if payload.get("scope") != required_scope:
+        return None
+    return payload

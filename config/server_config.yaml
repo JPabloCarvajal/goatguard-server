@@ -25,3 +25,5 @@ security:
   jwt_secret: "goatguard-dev-secret-change-in-production"
   jwt_algorithm: "HS256"
   jwt_expiration_hours: 24
+  fernet_key: ""  # Dejar vacío para auto-generar en dev. En prod: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+  hibp_check_enabled: true
