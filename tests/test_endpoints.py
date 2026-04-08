@@ -9,8 +9,9 @@ from sqlalchemy.orm import sessionmaker
 
 from src.database.models import (
     Base, Device, Network, NetworkCurrentMetrics,
-    DeviceCurrentMetrics, 
+    DeviceCurrentMetrics, User,
 )
+from src.api.auth import create_token, hash_password
 from src.api.dependencies import get_db
 from src.api.app import create_app
 from src.config.models import ServerConfig, SecurityConfig
@@ -114,73 +115,49 @@ def test_app():
 
 @pytest.fixture(scope="module")
 def auth_token(test_app):
-    """Login or register a user and return a valid JWT token."""
-    client = test_app["client"]
+    """Siembra un usuario directamente en BD y retorna un JWT válido.
 
-    # Try login first (user might exist from test_register)
-    response = client.post("/auth/login", json={
-        "username": "testadmin",
-        "password": "testpassword123",
-    })
-
-    if response.status_code == 200:
-        return response.json()["access_token"]
-
-    # If login fails, register
-    response = client.post("/auth/register", json={
-        "username": "testadmin",
-        "password": "testpassword123",
-    })
-
-    assert response.status_code in (200, 201), f"Register failed: {response.text}"
-    return response.json()["access_token"]
+    El flujo completo de ``/auth/register`` (con invitation token, TOTP
+    enrollment, backup codes, etc.) se cubre en ``test_auth_register.py``
+    y ``test_auth_totp.py`` [RF-13]. Este fixture se limita a proveer
+    una credencial válida para los tests de endpoints de negocio
+    (devices, networks, alerts, dashboard) sin depender del pipeline
+    público de autenticación.
+    """
+    TestSession = test_app["SessionLocal"]
+    session = TestSession()
+    try:
+        user = session.query(User).filter_by(username="testadmin").first()
+        if user is None:
+            user = User(
+                username="testadmin",
+                password_hash=hash_password(
+                    "testpassword123-long-enough-for-nist"
+                ),
+            )
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+        return create_token(user_id=user.id, username=user.username)
+    finally:
+        session.close()
 
 
 class TestAuthEndpoints:
-    """Tests for /auth/* endpoints."""
+    """Tests de guardado mínimo para ``/auth/*``.
 
-    def test_register_returns_token(self, test_app):
-        client = test_app["client"]
+    El flujo 2FA completo (register, totp/*, recovery/*) se prueba en
+    ``test_auth_register.py``, ``test_auth_totp.py`` y
+    ``test_auth_recovery.py``. Aquí solo mantenemos los invariantes
+    más básicos para detectar regresiones generales rápido.
+    """
 
-        response = client.post("/auth/register", json={
-            "username": "newuser",
-            "password": "password123",
-        })
+    def test_login_wrong_password(self, test_app, auth_token):
+        """Login con password incorrecto debe retornar 401.
 
-        assert response.status_code in (200, 201)
-        data = response.json()
-        assert "access_token" in data
-        assert data["token_type"] == "bearer"
-
-    def test_register_duplicate_username(self, test_app):
-        client = test_app["client"]
-
-        # First registration
-        client.post("/auth/register", json={
-            "username": "duplicate",
-            "password": "pass123",
-        })
-
-        # Second with same username
-        response = client.post("/auth/register", json={
-            "username": "duplicate",
-            "password": "pass456",
-        })
-
-        assert response.status_code in (400, 409)
-
-    def test_login_valid_credentials(self, test_app, auth_token):
-        client = test_app["client"]
-
-        response = client.post("/auth/login", json={
-            "username": "testadmin",
-            "password": "testpassword123",
-        })
-
-        assert response.status_code == 200
-        assert "access_token" in response.json()
-
-    def test_login_wrong_password(self, test_app):
+        El fixture ``auth_token`` garantiza que el user ``testadmin``
+        ya existe en la BD antes de este test.
+        """
         client = test_app["client"]
 
         response = client.post("/auth/login", json={

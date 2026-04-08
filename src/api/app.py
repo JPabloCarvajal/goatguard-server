@@ -16,9 +16,13 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from slowapi import _rate_limit_exceeded_handler
+from slowapi.errors import RateLimitExceeded
+from slowapi.middleware import SlowAPIMiddleware
 
 from src.api.auth import init_auth
-from src.api.dependencies import set_database
+from src.api.dependencies import set_database, set_security_config
+from src.api.rate_limit import limiter
 from src.api.routes import agents as agent_routes
 from src.api.routes import alerts as alert_routes
 from src.api.routes import auth as auth_routes
@@ -76,11 +80,20 @@ def create_app(database: Database, config) -> FastAPI:
 
     # Initialize shared modules
     set_database(database)
+    set_security_config(config.security)
     init_auth(
         jwt_secret=config.security.jwt_secret,
         jwt_algorithm=config.security.jwt_algorithm,
         jwt_expiration_hours=config.security.jwt_expiration_hours,
     )
+
+    # Rate limiting con slowapi [RF-13]. El limiter es un singleton
+    # a nivel de módulo para que los routers puedan decorar endpoints
+    # sin inyección — lo enganchamos a ``app.state`` que es lo que
+    # espera ``SlowAPIMiddleware`` y el exception handler.
+    app.state.limiter = limiter
+    app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+    app.add_middleware(SlowAPIMiddleware)
 
     # CORS: orígenes explícitos desde config.security.cors_origins.
     # Nunca usar ``["*"]`` porque la API acepta credenciales (JWT) y la
