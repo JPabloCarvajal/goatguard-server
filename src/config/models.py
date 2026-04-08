@@ -32,11 +32,24 @@ def _default_cors_origins() -> list[str]:
 
 @dataclass
 class SecurityConfig:
-    """Security settings for authentication and encryption."""
+    """Security settings for authentication and encryption.
+
+    ``fernet_key`` y ``hibp_check_enabled`` sostienen el flujo 2FA
+    [RF-13]: el primero cifra los secretos TOTP (AES-128-CBC + HMAC),
+    el segundo permite apagar la consulta a HaveIBeenPwned en redes
+    aisladas donde el fail-open no aporta valor.
+    """
     jwt_secret: str = "goatguard-dev-secret-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24
     cors_origins: list[str] = field(default_factory=_default_cors_origins)
+    # Clave Fernet para cifrar secretos TOTP. Vacía por defecto: debe
+    # inyectarse vía server_config.yaml o env var antes de habilitar 2FA.
+    # Generar con ``cryptography.fernet.Fernet.generate_key()``.
+    fernet_key: str = ""
+    # Verificación de passwords contra HaveIBeenPwned (k-anonymity).
+    # Fail-open con warning cuando la red no permite alcanzar el servicio.
+    hibp_check_enabled: bool = True
 
 @dataclass
 class NetworkConfig:
