@@ -94,6 +94,36 @@ class TestCORSConfiguration:
         assert cors_middleware.kwargs.get("allow_origins") == custom_origins
 
 
+class TestSeedScriptSecrets:
+    """Guardrail contra credenciales hardcodeadas en ``seed.py``."""
+
+    def test_seed_script_has_no_hardcoded_admin_password(self):
+        """``seed.py`` no debe hardcodear ``admin123`` ni ningún literal obvio.
+
+        El seed se usa tanto en desarrollo local como en CI y
+        (accidentalmente) en despliegues iniciales. Un literal
+        ``"admin123"`` en el repo abre la puerta a una toma de control
+        trivial en cuanto alguien olvide cambiar el password.
+
+        Fix esperado: leer el password desde ``GOATGUARD_ADMIN_PASSWORD``
+        y abortar con ``SystemExit`` si no está definida.
+        """
+        import pathlib
+
+        seed_path = (
+            pathlib.Path(__file__).resolve().parent.parent / "seed.py"
+        )
+        content = seed_path.read_text(encoding="utf-8")
+
+        forbidden_literals = ["admin123", "password123", "changeme"]
+        found = [lit for lit in forbidden_literals if lit in content]
+
+        assert found == [], (
+            f"seed.py contiene credenciales hardcodeadas: {found}. "
+            f"Leer desde GOATGUARD_ADMIN_PASSWORD en su lugar."
+        )
+
+
 class TestDeprecatedDatetime:
     """Guardrail contra ``datetime.utcnow()`` (deprecado en Python 3.12+).
 
