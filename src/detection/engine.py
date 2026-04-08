@@ -126,13 +126,6 @@ class DetectionEngine:
                 results = detector.evaluate(metrics)
 
                 # Process results → create alerts if needed
-                self.alert_manager.process_device_results(
-                    device_id=device.id,
-                    device_name=name,
-                    results=results,
-                )
-
-            # Process results → create alerts if needed
                 created = self.alert_manager.process_device_results(
                     device_id=device.id,
                     device_name=name,
