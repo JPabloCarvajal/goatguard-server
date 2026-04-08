@@ -302,9 +302,9 @@ def get_device_history(
         device_id: The device to query.
         hours: How many hours of history to return.
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     snapshots = db.query(EndpointSnapshot).filter(
         EndpointSnapshot.device_id == device_id,

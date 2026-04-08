@@ -94,6 +94,38 @@ class TestCORSConfiguration:
         assert cors_middleware.kwargs.get("allow_origins") == custom_origins
 
 
+class TestDeprecatedDatetime:
+    """Guardrail contra ``datetime.utcnow()`` (deprecado en Python 3.12+).
+
+    Python 3.12 deprecó ``datetime.utcnow()`` porque devuelve un naive
+    datetime que se interpreta erróneamente como local time en muchas
+    APIs. Debe reemplazarse por ``datetime.now(timezone.utc)``.
+    """
+
+    def test_src_has_no_datetime_utcnow_calls(self):
+        import pathlib
+        import re
+
+        src_root = pathlib.Path(__file__).resolve().parent.parent / "src"
+        # Captura tanto ``datetime.utcnow()`` como ``default=datetime.utcnow``
+        # (este último es el uso como callable en Column de SQLAlchemy).
+        pattern = re.compile(r"datetime\.utcnow\b")
+
+        offenders: list[str] = []
+        for py_file in src_root.rglob("*.py"):
+            content = py_file.read_text(encoding="utf-8")
+            for lineno, line in enumerate(content.splitlines(), start=1):
+                if pattern.search(line):
+                    rel = py_file.relative_to(src_root.parent)
+                    offenders.append(f"{rel}:{lineno}: {line.strip()}")
+
+        assert offenders == [], (
+            "Se encontraron llamadas a ``datetime.utcnow()`` en src/. "
+            "Reemplazar por ``datetime.now(timezone.utc)``:\n"
+            + "\n".join(offenders)
+        )
+
+
 class TestLifespan:
     """Invariantes del ciclo de vida de la aplicación."""
 
