@@ -132,26 +132,53 @@ class TestDeprecatedDatetime:
     APIs. Debe reemplazarse por ``datetime.now(timezone.utc)``.
     """
 
-    def test_src_has_no_datetime_utcnow_calls(self):
+    # Captura tanto ``datetime.utcnow()`` como ``default=datetime.utcnow``
+    # (este último es el uso como callable en Column de SQLAlchemy).
+    _UTCNOW_PATTERN = r"datetime\.utcnow\b"
+
+    def _scan_for_utcnow(self, root, skip_file=None):
         import pathlib
         import re
 
-        src_root = pathlib.Path(__file__).resolve().parent.parent / "src"
-        # Captura tanto ``datetime.utcnow()`` como ``default=datetime.utcnow``
-        # (este último es el uso como callable en Column de SQLAlchemy).
-        pattern = re.compile(r"datetime\.utcnow\b")
-
+        pattern = re.compile(self._UTCNOW_PATTERN)
         offenders: list[str] = []
-        for py_file in src_root.rglob("*.py"):
+        for py_file in root.rglob("*.py"):
+            if skip_file and py_file.resolve() == skip_file.resolve():
+                continue
             content = py_file.read_text(encoding="utf-8")
             for lineno, line in enumerate(content.splitlines(), start=1):
                 if pattern.search(line):
-                    rel = py_file.relative_to(src_root.parent)
+                    rel = py_file.relative_to(root.parent)
                     offenders.append(f"{rel}:{lineno}: {line.strip()}")
+        return offenders
+
+    def test_src_has_no_datetime_utcnow_calls(self):
+        import pathlib
+
+        src_root = pathlib.Path(__file__).resolve().parent.parent / "src"
+        offenders = self._scan_for_utcnow(src_root)
 
         assert offenders == [], (
-            "Se encontraron llamadas a ``datetime.utcnow()`` en src/. "
-            "Reemplazar por ``datetime.now(timezone.utc)``:\n"
+            "Se encontraron llamadas a datetime.utcnow en src/. "
+            "Reemplazar por datetime.now(timezone.utc):\n"
+            + "\n".join(offenders)
+        )
+
+    def test_tests_has_no_datetime_utcnow_calls(self):
+        """Los propios tests también deben estar libres del callable deprecado.
+
+        Excluye este archivo (``test_app_factory.py``) porque define el
+        guardrail y necesariamente menciona el identificador en la regex.
+        """
+        import pathlib
+
+        tests_root = pathlib.Path(__file__).resolve().parent
+        self_path = pathlib.Path(__file__).resolve()
+        offenders = self._scan_for_utcnow(tests_root, skip_file=self_path)
+
+        assert offenders == [], (
+            "Se encontraron llamadas a datetime.utcnow en tests/. "
+            "Reemplazar por datetime.now(timezone.utc):\n"
             + "\n".join(offenders)
         )
 

@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, ".")
 
 import jwt as pyjwt
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from src.api.auth import init_auth, create_token, verify_token, hash_password, verify_password
 
 # Initialize with known secret for testing
@@ -36,7 +36,7 @@ class TestJWTSecurity:
 
     def test_expired_token_rejected(self):
         """Token with past expiration should be rejected."""
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         payload = {
             "sub": "1",
             "username": "admin",
@@ -53,8 +53,8 @@ class TestJWTSecurity:
         payload = {
             "sub": "1",
             "username": "admin",
-            "exp": datetime.utcnow() + timedelta(hours=24),
-            "iat": datetime.utcnow(),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+            "iat": datetime.now(timezone.utc),
         }
         # Create unsigned token
         try:
@@ -69,8 +69,8 @@ class TestJWTSecurity:
         payload = {
             "sub": "1",
             "username": "admin",
-            "exp": datetime.utcnow() + timedelta(hours=24),
-            "iat": datetime.utcnow(),
+            "exp": datetime.now(timezone.utc) + timedelta(hours=24),
+            "iat": datetime.now(timezone.utc),
         }
         wrong_algo_token = pyjwt.encode(
             payload, TEST_SECRET, algorithm="HS384"

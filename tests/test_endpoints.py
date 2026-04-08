@@ -14,7 +14,7 @@ from src.database.models import (
 from src.api.dependencies import get_db
 from src.api.app import create_app
 from src.config.models import ServerConfig, SecurityConfig
-from datetime import datetime
+from datetime import datetime, timezone
 
 TEST_DATABASE_URL = "sqlite:///./test_goatguard.db"
 
@@ -72,7 +72,7 @@ def test_app():
 
     metrics = DeviceCurrentMetrics(
         device_id=device.id,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         cpu_pct=15.0, ram_pct=42.0, bandwidth_in=500.0,
         bandwidth_out=100.0, tcp_retransmissions=0, failed_connections=2,
     )
@@ -80,7 +80,7 @@ def test_app():
 
     net_metrics = NetworkCurrentMetrics(
         network_id=network.id,
-        timestamp=datetime.utcnow(),
+        timestamp=datetime.now(timezone.utc),
         isp_latency_avg=11.5, packet_loss_pct=0.0, jitter=0.2,
         active_connections=50, failed_connections_global=5,
     )
