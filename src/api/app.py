@@ -60,12 +60,13 @@ def create_app(database: Database, config) -> FastAPI:
         jwt_expiration_hours=config.security.jwt_expiration_hours,
     )
 
-    # CORS: allow mobile app to connect from any origin.
-    # The app may connect from localhost (emulator), LAN IP
-    # (same network), or a Cloudflare Tunnel domain (remote).
+    # CORS: orígenes explícitos desde config.security.cors_origins.
+    # Nunca usar ``["*"]`` porque la API acepta credenciales (JWT) y la
+    # CORS spec (W3C Fetch §3.2.2) obliga a los navegadores a rechazar
+    # la combinación wildcard + credentials.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=config.security.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],

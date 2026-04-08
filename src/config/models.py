@@ -13,12 +13,30 @@ class ConfigError(Exception):
     pass
 
 
+def _default_cors_origins() -> list[str]:
+    """Orígenes permitidos por defecto para desarrollo local.
+
+    En producción se debe sobrescribir desde ``server_config.yaml`` o
+    variables de entorno con el dominio público de la app móvil.
+    Nunca usar ``["*"]`` porque la API acepta credenciales (JWT).
+    """
+    return [
+        "http://localhost",
+        "http://localhost:3000",
+        "http://localhost:8000",
+        "http://127.0.0.1",
+        "http://127.0.0.1:3000",
+        "http://127.0.0.1:8000",
+    ]
+
+
 @dataclass
 class SecurityConfig:
     """Security settings for authentication and encryption."""
     jwt_secret: str = "goatguard-dev-secret-change-in-production"
     jwt_algorithm: str = "HS256"
     jwt_expiration_hours: int = 24
+    cors_origins: list[str] = field(default_factory=_default_cors_origins)
 
 @dataclass
 class NetworkConfig:

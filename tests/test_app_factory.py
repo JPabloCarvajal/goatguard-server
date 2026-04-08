@@ -48,6 +48,51 @@ def _collect_endpoints(app) -> list[tuple[str, str]]:
     return endpoints
 
 
+class TestCORSConfiguration:
+    """Invariantes de seguridad sobre el middleware CORS."""
+
+    def test_cors_default_does_not_allow_wildcard_with_credentials(self):
+        """La combinación ``allow_origins=["*"]`` + ``allow_credentials=True``
+        viola la CORS spec (W3C Fetch §3.2.2) y los navegadores la rechazan.
+        Debemos partir de una lista explícita de orígenes seguros.
+        """
+        app = _build_app()
+
+        cors_middleware = None
+        for middleware in app.user_middleware:
+            if "CORS" in middleware.cls.__name__:
+                cors_middleware = middleware
+                break
+
+        assert cors_middleware is not None, "CORSMiddleware no está registrado"
+
+        kwargs = cors_middleware.kwargs
+        allow_origins = kwargs.get("allow_origins", [])
+        allow_credentials = kwargs.get("allow_credentials", False)
+
+        if allow_credentials:
+            assert "*" not in allow_origins, (
+                "allow_origins=['*'] es incompatible con allow_credentials=True "
+                "(los navegadores rechazan cross-origin con credentials + wildcard). "
+                "Usar una lista explícita de orígenes desde config.security.cors_origins."
+            )
+
+    def test_cors_origins_configurable_via_security_config(self):
+        """``config.security.cors_origins`` debe existir y ser usada por create_app."""
+        config = ServerConfig()
+        config.security.jwt_secret = "goatguard-test-secret-key-for-pytest-suite"
+        custom_origins = ["https://goatguard.example.com", "http://localhost:3000"]
+        config.security.cors_origins = custom_origins
+
+        app = create_app(_FakeDatabase(), config)
+
+        cors_middleware = next(
+            (m for m in app.user_middleware if "CORS" in m.cls.__name__), None
+        )
+        assert cors_middleware is not None
+        assert cors_middleware.kwargs.get("allow_origins") == custom_origins
+
+
 class TestRouterRegistration:
     """Invariantes sobre el registro de routers en ``create_app``."""
 
