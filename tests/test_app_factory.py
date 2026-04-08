@@ -6,6 +6,7 @@ que no dependen de requests HTTP: registro de routers, configuración
 de middleware y ciclo de vida.
 """
 import sys
+import warnings
 
 sys.path.insert(0, ".")
 
@@ -91,6 +92,45 @@ class TestCORSConfiguration:
         )
         assert cors_middleware is not None
         assert cors_middleware.kwargs.get("allow_origins") == custom_origins
+
+
+class TestLifespan:
+    """Invariantes del ciclo de vida de la aplicación."""
+
+    def test_create_app_does_not_use_deprecated_on_event(self):
+        """``create_app`` no debe usar ``@app.on_event``.
+
+        ``on_event`` está deprecado desde FastAPI 0.93 y será removido.
+        Debemos usar el context manager ``lifespan=`` pasado al
+        constructor de ``FastAPI``.
+        """
+        with warnings.catch_warnings(record=True) as captured:
+            warnings.simplefilter("always")
+            _build_app()
+
+        on_event_warnings = [
+            w for w in captured
+            if "on_event is deprecated" in str(w.message)
+        ]
+        assert on_event_warnings == [], (
+            f"create_app sigue usando @app.on_event (deprecado). "
+            f"Migrar a lifespan=. Warnings capturados: "
+            f"{[str(w.message) for w in on_event_warnings]}"
+        )
+
+    def test_app_has_lifespan_context(self):
+        """La app debe exponer un ``lifespan_context`` custom, no el default."""
+        app = _build_app()
+
+        # Starlette asigna un default lifespan_context si no se pasa uno.
+        # El nuestro debe ser diferente del sentinel por defecto.
+        lifespan = app.router.lifespan_context
+        assert lifespan is not None
+        # El default de Starlette es ``default_lifespan``; el nuestro tiene
+        # otro nombre o es una función definida en create_app.
+        assert lifespan.__name__ != "default_lifespan", (
+            "create_app no está pasando un lifespan custom al constructor de FastAPI"
+        )
 
 
 class TestRouterRegistration:
