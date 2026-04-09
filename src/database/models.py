@@ -174,8 +174,69 @@ class User(Base):
     password_hash = Column(String(255), nullable=False)
     created_at = Column(DateTime, nullable=False, default=_utcnow)
 
+    # ── 2FA TOTP [RF-13] ──────────────────────────────────────────────────
+    # totp_secret_enc: cifrado Fernet (AES-128-CBC + HMAC-SHA256). No se
+    # hashea porque debe ser recuperable para verificar códigos TOTP.
+    totp_secret_enc = Column(String(500), nullable=True)
+    totp_enabled = Column(Boolean, nullable=False, default=False)
+    totp_enrolled_at = Column(DateTime(timezone=True), nullable=True)
+    # totp_last_used_at: anti-replay. Si un código cae en el mismo time-step
+    # (30s) que el último uso, se rechaza para cerrar la ventana de replay.
+    totp_last_used_at = Column(DateTime(timezone=True), nullable=True)
+
+    # ── Invalidación de tokens tras cambio de password [RF-13] ────────────
+    # Cualquier JWT emitido antes de este timestamp se considera inválido.
+    password_changed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # ── Recuperación de password con recovery code [RF-13] ────────────────
+    recovery_code_hash = Column(String(255), nullable=True)
+    recovery_code_attempts = Column(Integer, nullable=False, default=0)
+    recovery_code_used = Column(Boolean, nullable=False, default=False)
+
     sessions = relationship("Session", back_populates="user")
     push_tokens = relationship("PushToken", back_populates="user")
+    totp_backup_codes = relationship(
+        "TotpBackupCode",
+        back_populates="user",
+        cascade="all, delete-orphan",
+    )
+
+
+class InvitationToken(Base):
+    """Token de invitación para registro de administrador [RF-13].
+
+    El token plano se entrega fuera de banda (email, Slack, etc.) y se
+    almacena solo como SHA-256 para que una filtración de la BD no exponga
+    tokens reutilizables. ``used=True`` evita que un mismo token cree
+    dos cuentas aunque quien lo invitó lo haya compartido por error.
+    """
+    __tablename__ = "invitation_token"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    token_hash = Column(String(255), nullable=False, unique=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    used = Column(Boolean, nullable=False, default=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class TotpBackupCode(Base):
+    """Código de respaldo TOTP para acceso de emergencia [RF-13].
+
+    Se generan 10 por usuario en el enrollment. Cada código es single-use
+    (``used=True`` permanente tras verificar) y se almacena como hash bcrypt
+    porque es un secreto equivalente a un segundo factor válido.
+    """
+    __tablename__ = "totp_backup_code"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)
+    user_id = Column(Integer, ForeignKey("user.id"), nullable=False)
+    code_hash = Column(String(255), nullable=False)
+    used = Column(Boolean, nullable=False, default=False)
+    used_at = Column(DateTime(timezone=True), nullable=True)
+    created_at = Column(DateTime(timezone=True), nullable=False, default=_utcnow)
+
+    user = relationship("User", back_populates="totp_backup_codes")
 
 class Session(Base):
     """Active JWT session for a user."""

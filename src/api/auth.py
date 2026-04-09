@@ -89,33 +89,40 @@ def verify_password(plain_password: str, hashed_password: str) -> bool:
     )
 
 
-def create_token(user_id: int, username: str) -> str:
-    """Create a signed JWT token.
+def create_token(
+    user_id: int,
+    username: str,
+    scope: str = "full_access",
+    expiration_minutes: Optional[int] = None,
+) -> str:
+    """Create a signed JWT token con scope explícito [RF-13].
 
-    The token payload contains:
-        sub: user ID (who this token belongs to)
-        username: for display in the app
-        exp: expiration timestamp (24 hours from now)
-        iat: issued-at timestamp
+    Scopes válidos en el flujo 2FA:
+        - ``full_access``: acceso normal tras password + TOTP verificado.
+        - ``pending_totp``: solo habilita los endpoints del segundo factor.
+        - ``password_reset``: solo habilita reset de contraseña tras
+          presentar un recovery code válido.
 
-    The token has three parts separated by dots: header.payload.signature
-    Anyone can READ the payload (base64, not encrypted).
-    But only the server can CREATE a valid signature because only
-    the server knows the secret key.
+    ``expiration_minutes`` permite emitir tokens efímeros (ej. 5 min
+    para ``pending_totp``) sin tocar la configuración global. Si se
+    omite, se usa ``jwt_expiration_hours`` convertido a minutos.
 
-    Args:
-        user_id: The authenticated user's database ID.
-        username: The user's display name.
-
-    Returns:
-        Signed JWT token as a string.
+    El payload contiene además ``sub`` (user id), ``username``, ``iat``
+    (issued-at) y ``exp`` (expiration). El token tiene tres partes
+    separadas por puntos: ``header.payload.signature``. Cualquiera
+    puede leer el payload (base64, no cifrado), pero solo el server
+    puede firmar porque solo él conoce el secreto.
     """
     now = datetime.now(timezone.utc)
+    exp_minutes = expiration_minutes if expiration_minutes is not None else (
+        _jwt_expiration_hours * 60
+    )
     payload = {
         "sub": str(user_id),
         "username": username,
-        "exp": now + timedelta(hours=_jwt_expiration_hours),
+        "scope": scope,
         "iat": now,
+        "exp": now + timedelta(minutes=exp_minutes),
     }
     return jwt.encode(payload, _jwt_secret, algorithm=_jwt_algorithm)
 
@@ -144,3 +151,21 @@ def verify_token(token: str) -> Optional[dict]:
     except jwt.InvalidTokenError as e:
         logger.debug(f"Invalid token: {e}")
         return None
+
+
+def verify_token_scope(token: str, required_scope: str) -> Optional[dict]:
+    """Verifica un JWT y exige un ``scope`` específico [RF-13].
+
+    Devuelve el payload solo si el token es válido Y su scope coincide
+    con ``required_scope``. En cualquier otro caso retorna ``None`` —
+    el caller debe interpretar eso como 401/403 según el endpoint.
+
+    Separar esta función de ``verify_token`` mantiene el contrato del
+    decode simple para los endpoints legacy que no usan scopes.
+    """
+    payload = verify_token(token)
+    if payload is None:
+        return None
+    if payload.get("scope") != required_scope:
+        return None
+    return payload

@@ -12,8 +12,9 @@ import pytest
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+
+from tests.db_test_utils import make_test_engine
 
 from src.api.auth import init_auth, create_token
 from src.api.dependencies import get_db
@@ -47,13 +48,16 @@ def db_session():
     """
     Crea un engine SQLite in-memory y una sesión limpia para cada test.
 
-    check_same_thread=False es necesario porque pytest y FastAPI
-    pueden usar el mismo engine desde hilos distintos.
+    ``check_same_thread=False`` + ``StaticPool`` son obligatorios:
+    - FastAPI TestClient ejecuta los endpoints en un threadpool distinto
+      del hilo de pytest.
+    - SQLite ``:memory:`` crea una BD NUEVA por conexión. Sin StaticPool,
+      cada hilo recibiría una BD vacía y las tablas creadas por
+      ``Base.metadata.create_all`` no serían visibles desde el handler.
+    StaticPool fuerza al engine a reutilizar una única conexión para
+    todos los hilos, unificando la BD in-memory.
     """
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-    )
+    engine = make_test_engine()
     Base.metadata.create_all(engine)
     TestingSession = sessionmaker(bind=engine)
     session = TestingSession()
