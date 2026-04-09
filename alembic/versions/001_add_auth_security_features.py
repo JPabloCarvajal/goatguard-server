@@ -50,7 +50,7 @@ def upgrade() -> None:
                 "totp_enabled",
                 sa.Boolean(),
                 nullable=False,
-                server_default=sa.text("0"),
+                server_default=sa.text("false"),
             )
         )
         batch_op.add_column(
@@ -81,7 +81,7 @@ def upgrade() -> None:
                 "recovery_code_used",
                 sa.Boolean(),
                 nullable=False,
-                server_default=sa.text("0"),
+                server_default=sa.text("false"),
             )
         )
 
@@ -96,7 +96,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column(
-            "used", sa.Boolean(), nullable=False, server_default=sa.text("0")
+            "used", sa.Boolean(), nullable=False, server_default=sa.text("false")
         ),
         sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
         sa.UniqueConstraint("token_hash"),
@@ -113,7 +113,7 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Integer(), nullable=False),
         sa.Column("code_hash", sa.String(length=255), nullable=False),
         sa.Column(
-            "used", sa.Boolean(), nullable=False, server_default=sa.text("0")
+            "used", sa.Boolean(), nullable=False, server_default=sa.text("false")
         ),
         sa.Column("used_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),

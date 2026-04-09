@@ -16,7 +16,6 @@ import sys
 from unittest.mock import patch
 
 import httpx
-import pytest
 
 sys.path.insert(0, ".")
 

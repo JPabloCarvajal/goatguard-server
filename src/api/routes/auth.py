@@ -29,7 +29,7 @@ from src.api.auth import (
     verify_token_scope,
 )
 from src.api.dependencies import (
-    get_current_user,
+    get_current_user_pending_totp,
     get_current_user_totp_verified,
     get_db,
     get_security_config,
@@ -140,7 +140,7 @@ def register(
     existing = db.query(User).filter_by(username=body.username).first()
     if existing:
         raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT, detail=_REGISTER_FAIL,
+            status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
         )
 
     is_valid, error_msg = validate_password_nist(body.password)
@@ -270,7 +270,7 @@ def login(
 def totp_enroll_verify(
     request: Request,
     body: TotpCodeRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_pending_totp),
     db: Session = Depends(get_db),
 ):
     """Verifica el primer código TOTP del enrollment y emite backup codes.
@@ -325,7 +325,7 @@ def totp_enroll_verify(
 def totp_verify(
     request: Request,
     body: TotpCodeRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_pending_totp),
     db: Session = Depends(get_db),
 ):
     """Verifica el código TOTP del segundo paso de login.
@@ -371,7 +371,7 @@ def totp_verify(
 def totp_verify_backup(
     request: Request,
     body: BackupCodeVerifyRequest,
-    user: User = Depends(get_current_user),
+    user: User = Depends(get_current_user_pending_totp),
     db: Session = Depends(get_db),
 ):
     """Verifica un backup code como alternativa al TOTP.

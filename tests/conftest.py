@@ -12,9 +12,9 @@ import pytest
 from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+
+from tests.db_test_utils import make_test_engine
 
 from src.api.auth import init_auth, create_token
 from src.api.dependencies import get_db
@@ -57,11 +57,7 @@ def db_session():
     StaticPool fuerza al engine a reutilizar una única conexión para
     todos los hilos, unificando la BD in-memory.
     """
-    engine = create_engine(
-        "sqlite:///:memory:",
-        connect_args={"check_same_thread": False},
-        poolclass=StaticPool,
-    )
+    engine = make_test_engine()
     Base.metadata.create_all(engine)
     TestingSession = sessionmaker(bind=engine)
     session = TestingSession()

@@ -156,6 +156,24 @@ def get_current_user(
     return user
 
 
+def get_current_user_pending_totp(
+    user: User = Depends(get_current_user),
+) -> User:
+    """Dependencia para endpoints del segundo factor — exige scope ``pending_totp`` [RF-13].
+
+    Solo permite tokens emitidos tras login paso 1 o registro.
+    Rechaza ``full_access`` y ``password_reset`` con 403 para que un
+    token de sesión completa no pueda reingresar al flujo TOTP.
+    """
+    token_scope = getattr(user, "_token_scope", "full_access")
+    if token_scope != "pending_totp":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Se requiere un token pending_totp para este endpoint",
+        )
+    return user
+
+
 def get_current_user_totp_verified(
     user: User = Depends(get_current_user),
 ) -> User:
