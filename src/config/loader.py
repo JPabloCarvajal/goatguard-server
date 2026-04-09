@@ -14,6 +14,7 @@ import yaml
 from src.config.models import (
     ConfigError,
     DatabaseConfig,
+    FirebaseConfig,
     LoggingConfig,
     NetworkConfig,
     PcapConfig,
@@ -91,6 +92,7 @@ def _build_config(raw: dict) -> ServerConfig:
         database=DatabaseConfig(**raw.get("database", {})),
         logging=LoggingConfig(**raw.get("logging", {})),
         security=SecurityConfig(**raw.get("security", {})),
+        firebase=FirebaseConfig(**raw.get("firebase", {})),
     )
 
 
@@ -132,6 +134,8 @@ def _apply_env_overrides(config: ServerConfig) -> None:
         "GOATGUARD_DB_USER": lambda v: setattr(config.database, "user", v),
         "GOATGUARD_DB_PASSWORD": lambda v: setattr(config.database, "password", v),
         "GOATGUARD_JWT_SECRET": lambda v: setattr(config.security, "jwt_secret", v),
+        "GOATGUARD_FIREBASE_CREDENTIALS_PATH": lambda v: setattr(config.firebase, "credentials_path", v),
+        "GOATGUARD_FIREBASE_ENABLED": lambda v: setattr(config.firebase, "enabled", v.lower() in ("true", "1", "yes")),
     }
 
     for env_var, setter in env_map.items():

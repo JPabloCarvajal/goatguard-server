@@ -63,6 +63,13 @@ class LoggingConfig:
 
 
 @dataclass
+class FirebaseConfig:
+    """Firebase Cloud Messaging settings for push notifications."""
+    credentials_path: str = "config/firebase-service-account.json"
+    enabled: bool = True
+
+
+@dataclass
 class ServerConfig:
     """Root configuration object grouping all sections.
 
@@ -76,3 +83,4 @@ class ServerConfig:
     database: DatabaseConfig = field(default_factory=DatabaseConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
+    firebase: FirebaseConfig = field(default_factory=FirebaseConfig)

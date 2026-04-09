@@ -17,6 +17,7 @@ from src.database.models import (
     DeviceCurrentMetrics,
     Network,
     NetworkCurrentMetrics,
+    PushToken,
     TopTalkerCurrent,
 )
 
@@ -714,6 +715,82 @@ class Repository:
         except Exception as e:
             session.rollback()
             logger.error(f"Failed to save recent connections: {e}")
+        finally:
+            session.close()
+
+    # ── Push token operations ──────────────────────────────────
+
+    def upsert_push_token(self, user_id: int, token: str,
+                          platform: str = "android") -> None:
+        """Register or update an FCM push token for a user.
+
+        If the token already exists for this user, updates the
+        timestamp. If it belongs to another user (device changed
+        accounts), reassigns it. Otherwise creates a new record.
+        """
+        session = self._get_session()
+        try:
+            existing = session.query(PushToken).filter_by(token=token).first()
+
+            if existing:
+                existing.user_id = user_id
+                existing.platform = platform
+                existing.created_at = datetime.utcnow()
+            else:
+                entry = PushToken(
+                    user_id=user_id,
+                    token=token,
+                    platform=platform,
+                )
+                session.add(entry)
+
+            session.commit()
+            logger.info(f"Push token registered for user {user_id} ({platform})")
+
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to upsert push token: {e}")
+        finally:
+            session.close()
+
+    def delete_push_token(self, token: str) -> None:
+        """Remove an FCM token (used on logout or when token is invalid)."""
+        session = self._get_session()
+        try:
+            session.query(PushToken).filter_by(token=token).delete()
+            session.commit()
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to delete push token: {e}")
+        finally:
+            session.close()
+
+    def get_all_push_tokens(self) -> list[str]:
+        """Return all registered FCM tokens for broadcast."""
+        session = self._get_session()
+        try:
+            tokens = session.query(PushToken.token).all()
+            return [t[0] for t in tokens]
+        except Exception as e:
+            logger.error(f"Failed to fetch push tokens: {e}")
+            return []
+        finally:
+            session.close()
+
+    def delete_push_tokens_batch(self, tokens: list[str]) -> None:
+        """Remove multiple invalid FCM tokens in one transaction."""
+        if not tokens:
+            return
+        session = self._get_session()
+        try:
+            session.query(PushToken).filter(
+                PushToken.token.in_(tokens)
+            ).delete(synchronize_session="fetch")
+            session.commit()
+            logger.info(f"Removed {len(tokens)} invalid push tokens")
+        except Exception as e:
+            session.rollback()
+            logger.error(f"Failed to batch-delete push tokens: {e}")
         finally:
             session.close()
 
