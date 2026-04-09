@@ -735,7 +735,7 @@ class Repository:
             if existing:
                 existing.user_id = user_id
                 existing.platform = platform
-                existing.created_at = datetime.utcnow()
+                existing.created_at = datetime.now(timezone.utc)
             else:
                 entry = PushToken(
                     user_id=user_id,
