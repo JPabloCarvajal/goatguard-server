@@ -18,7 +18,8 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
 
-from src.database.models import Base, PushToken
+from src.database.models import Base, PushToken, User
+from src.api.auth import create_token, hash_password
 from src.api.dependencies import get_db
 from src.api.app import create_app
 from src.config.models import ServerConfig, SecurityConfig
@@ -69,14 +70,22 @@ def notif_app():
 
 @pytest.fixture(scope="module")
 def auth_token(notif_app):
-    """Register a user and return a valid JWT token."""
-    client = notif_app["client"]
-    resp = client.post("/auth/register", json={
-        "username": "notif_admin",
-        "password": "testpass123",
-    })
-    assert resp.status_code == 201
-    return resp.json()["access_token"]
+    """Crea un user directo en BD y devuelve JWT full_access.
+
+    No usa /auth/register porque el flujo 2FA requiere invitation_token
+    y devuelve scope=pending_totp, insuficiente para endpoints protegidos.
+    """
+    session = notif_app["SessionLocal"]()
+    user = User(
+        username="notif_admin",
+        password_hash=hash_password("goatguard-notif-test-pwd"),
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    token = create_token(user_id=user.id, username=user.username)
+    session.close()
+    return token
 
 
 @pytest.fixture(scope="module")
