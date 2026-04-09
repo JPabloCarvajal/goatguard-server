@@ -137,7 +137,6 @@ class TestDeprecatedDatetime:
     _UTCNOW_PATTERN = r"datetime\.utcnow\b"
 
     def _scan_for_utcnow(self, root, skip_file=None):
-        import pathlib
         import re
 
         pattern = re.compile(self._UTCNOW_PATTERN)

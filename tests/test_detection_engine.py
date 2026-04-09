@@ -7,7 +7,7 @@ invoca el ``AlertManager``, cómo se encadenan devices y red, etc.
 """
 import sys
 from types import SimpleNamespace
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
 
 sys.path.insert(0, ".")
 
