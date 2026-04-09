@@ -15,7 +15,7 @@ its own proof of authenticity (a cryptographic signature).
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Optional
 
 import bcrypt
@@ -110,7 +110,7 @@ def create_token(user_id: int, username: str) -> str:
     Returns:
         Signed JWT token as a string.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
     payload = {
         "sub": str(user_id),
         "username": username,

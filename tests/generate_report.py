@@ -3,7 +3,7 @@ import sys
 sys.path.insert(0, ".")
 
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from src.detection.baseline import MetricBaseline
 from src.detection.anomaly_detector import DeviceDetector, AnomalyResult
 from src.detection.insight_generator import generate_device_insight, _z_to_probability
@@ -299,8 +299,8 @@ def run_all():
     import jwt as pyjwt
     expired_payload = {
         "sub": "1", "username": "admin",
-        "exp": datetime.utcnow() - __import__("datetime").timedelta(hours=1),
-        "iat": datetime.utcnow(),
+        "exp": datetime.now(timezone.utc) - timedelta(hours=1),
+        "iat": datetime.now(timezone.utc),
     }
     expired = pyjwt.encode(expired_payload, "test-secret-key-for-goatguard-report-gen", algorithm="HS256")
     section["tests"].append({

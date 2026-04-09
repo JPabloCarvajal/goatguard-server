@@ -7,8 +7,10 @@ Uso:
     python seed.py                                   # pobla datos
 """
 
+import logging
+import os
 import sys
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, ".")
 
@@ -20,7 +22,33 @@ from src.database.models import (
 )
 from src.api.auth import hash_password
 
-NOW = datetime.utcnow()
+logger = logging.getLogger(__name__)
+
+NOW = datetime.now(timezone.utc)
+
+
+def _get_admin_password() -> str:
+    """Obtiene el password del admin desde variables de entorno.
+
+    Nunca aceptamos un default hardcodeado: un script de seed publicado
+    con un password conocido es una invitación abierta a tomar control
+    del sistema apenas se despliegue. Si la variable no está definida,
+    abortamos ruidosamente.
+    """
+    password = os.environ.get("GOATGUARD_ADMIN_PASSWORD")
+    if not password:
+        raise SystemExit(
+            "ERROR: GOATGUARD_ADMIN_PASSWORD no está definida. "
+            "Define la variable de entorno con el password del admin "
+            "antes de ejecutar seed.py. Ejemplo:\n"
+            "    GOATGUARD_ADMIN_PASSWORD='<password-fuerte>' python seed.py"
+        )
+    if len(password) < 12:
+        raise SystemExit(
+            "ERROR: GOATGUARD_ADMIN_PASSWORD debe tener al menos 12 "
+            "caracteres. Usa un password manager para generarlo."
+        )
+    return password
 
 
 def seed(session):
@@ -33,11 +61,14 @@ def seed(session):
     session.flush()
 
     # --- Usuario admin ---
+    # Password leído desde GOATGUARD_ADMIN_PASSWORD (obligatorio).
+    # Ver `_get_admin_password()` para la política de validación.
     admin = session.query(User).filter_by(username="admin").first()
     if not admin:
+        admin_password = _get_admin_password()
         admin = User(
             username="admin",
-            password_hash=hash_password("admin123"),
+            password_hash=hash_password(admin_password),
             created_at=NOW,
         )
         session.add(admin)

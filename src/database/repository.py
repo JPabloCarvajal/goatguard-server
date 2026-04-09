@@ -8,7 +8,7 @@ to change queries without touching the rest of the system.
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from src.discovery.enrichment import enrich_device_vendor
 
 from src.database.models import (
@@ -62,8 +62,8 @@ class Repository:
             agent = session.query(Agent).filter_by(uid=agent_id).first()
 
             if agent:
-                agent.last_heartbeat = datetime.utcnow()
-                agent.device.last_seen = datetime.utcnow()
+                agent.last_heartbeat = datetime.now(timezone.utc)
+                agent.device.last_seen = datetime.now(timezone.utc)
                 agent.device.ip = sender_ip
                 session.commit()
                 return agent.device_id
@@ -83,7 +83,7 @@ class Repository:
                 device.hostname = hostname
                 device.has_agent = True
                 device.status = "active"
-                device.last_seen = datetime.utcnow()
+                device.last_seen = datetime.now(timezone.utc)
             else:
                 # Completely new device
                 device = Device(
@@ -135,7 +135,7 @@ class Repository:
                 device_id=device_id
             ).first()
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             if current:
                 current.timestamp = now
@@ -254,7 +254,7 @@ class Repository:
                 network_id=network_id
             ).first()
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             if current:
                 current.timestamp = now
@@ -369,11 +369,11 @@ class Repository:
         try:
             agent = session.query(Agent).filter_by(uid=agent_id).first()
             if agent:
-                agent.last_heartbeat = datetime.utcnow()
+                agent.last_heartbeat = datetime.now(timezone.utc)
                 agent.status = "active"
                 if agent.device:
                     agent.device.status = "active"
-                    agent.device.last_seen = datetime.utcnow()
+                    agent.device.last_seen = datetime.now(timezone.utc)
                 session.commit()
         except Exception as e:
             session.rollback()
@@ -397,7 +397,7 @@ class Repository:
                 network_id=network_id
             ).first()
 
-            now = datetime.utcnow()
+            now = datetime.now(timezone.utc)
 
             if current:
                 current.timestamp = now
@@ -448,7 +448,7 @@ class Repository:
 
             if device:
                 device.ip = ip
-                device.last_seen = datetime.utcnow()
+                device.last_seen = datetime.now(timezone.utc)
                 if not device.has_agent:
                     device.status = "active"
                 if not device.detected_type:
@@ -533,7 +533,7 @@ class Repository:
             snapshot = EndpointSnapshot(
                 device_id=device_id,
                 network_snapshot_id=network_snapshot_id,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 # System metrics from UDP (device_current_metrics)
                 cpu_pct=current.cpu_pct if current else None,
                 ram_pct=current.ram_pct if current else None,
@@ -580,7 +580,7 @@ class Repository:
 
             snapshot = NetworkSnapshot(
                 network_id=network_id,
-                timestamp=datetime.utcnow(),
+                timestamp=datetime.now(timezone.utc),
                 # ISP metrics from probe (network_current_metrics)
                 isp_latency_avg=current.isp_latency_avg if current else None,
                 packet_loss_pct=current.packet_loss_pct if current else None,
@@ -705,7 +705,7 @@ class Repository:
                     proto=data["proto"],
                     total_bytes=data["total_bytes"],
                     connection_count=data["count"],
-                    last_seen=datetime.utcnow(),
+                    last_seen=datetime.now(timezone.utc),
                 )
                 session.add(entry)
 
@@ -735,7 +735,7 @@ class Repository:
             if existing:
                 existing.user_id = user_id
                 existing.platform = platform
-                existing.created_at = datetime.utcnow()
+                existing.created_at = datetime.now(timezone.utc)
             else:
                 entry = PushToken(
                     user_id=user_id,

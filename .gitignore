@@ -39,6 +39,8 @@ config/firebase-service-account.json
 .coverage
 .pytest_cache/
 .mypy_cache/
+test_report.html
+htmlcov/
 
 # ML models (too large for git)
 models/*.pkl

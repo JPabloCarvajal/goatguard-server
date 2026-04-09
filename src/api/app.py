@@ -10,24 +10,25 @@ easier (you can create multiple app instances with different
 configs) and keeps the configuration explicit.
 """
 
+import asyncio
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from src.api.auth import init_auth
 from src.api.dependencies import set_database
+from src.api.routes import agents as agent_routes
+from src.api.routes import alerts as alert_routes
 from src.api.routes import auth as auth_routes
-from src.database.connection import Database
+from src.api.routes import dashboard as dashboard_routes
 from src.api.routes import devices as device_routes
 from src.api.routes import network as network_routes
-from src.api.routes import alerts as alert_routes
-import asyncio
-from src.api.websocket import router as ws_router
-from src.api.websocket import broadcast_loop
-from src.api.routes import dashboard as dashboard_routes
-from src.api.routes import agents as agent_routes
 from src.api.routes import notifications as notification_routes
+from src.api.websocket import broadcast_loop
+from src.api.websocket import router as ws_router
+from src.database.connection import Database
 
 logger = logging.getLogger(__name__)
 
@@ -46,10 +47,31 @@ def create_app(database: Database, config) -> FastAPI:
     Returns:
         Configured FastAPI application.
     """
+    @asynccontextmanager
+    async def lifespan(_app: FastAPI):
+        """Ciclo de vida de la app: arranca el broadcast loop al inicio
+        y lo cancela limpiamente al apagado. Reemplaza el decorador
+        ``@app.on_event("startup")`` deprecado desde FastAPI 0.93.
+        """
+        broadcast_task = asyncio.create_task(
+            broadcast_loop(database.get_session)
+        )
+        logger.info("Broadcast loop iniciado via lifespan")
+        try:
+            yield
+        finally:
+            broadcast_task.cancel()
+            try:
+                await broadcast_task
+            except asyncio.CancelledError:
+                pass
+            logger.info("Broadcast loop cancelado en shutdown")
+
     app = FastAPI(
         title="GOATGuard API",
         description="Network monitoring and security management API",
         version="1.0.0",
+        lifespan=lifespan,
     )
 
     # Initialize shared modules
@@ -60,12 +82,13 @@ def create_app(database: Database, config) -> FastAPI:
         jwt_expiration_hours=config.security.jwt_expiration_hours,
     )
 
-    # CORS: allow mobile app to connect from any origin.
-    # The app may connect from localhost (emulator), LAN IP
-    # (same network), or a Cloudflare Tunnel domain (remote).
+    # CORS: orígenes explícitos desde config.security.cors_origins.
+    # Nunca usar ``["*"]`` porque la API acepta credenciales (JWT) y la
+    # CORS spec (W3C Fetch §3.2.2) obliga a los navegadores a rechazar
+    # la combinación wildcard + credentials.
     app.add_middleware(
         CORSMiddleware,
-        allow_origins=["*"],
+        allow_origins=config.security.cors_origins,
         allow_credentials=True,
         allow_methods=["*"],
         allow_headers=["*"],
@@ -82,10 +105,7 @@ def create_app(database: Database, config) -> FastAPI:
     app.include_router(agent_routes.router)
 
     app.include_router(ws_router)
-    @app.on_event("startup")
-    async def start_broadcast():
-        asyncio.create_task(broadcast_loop(database.get_session))
-        
+
     logger.info("FastAPI application created")
 
     return app

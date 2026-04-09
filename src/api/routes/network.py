@@ -221,9 +221,9 @@ def get_network_history(
     Returns snapshots from the last N hours (default 4).
     Used for ISP health trend graphs.
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     snapshots = db.query(NetworkSnapshot).filter(
         NetworkSnapshot.timestamp >= cutoff,
@@ -254,9 +254,9 @@ def get_top_talkers_history(
     Each snapshot contains the full ranking for that cycle.
     Used for bandwidth consumption trend graphs.
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
-    cutoff = datetime.utcnow() - timedelta(hours=hours)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
 
     snapshots = db.query(NetworkSnapshot).filter(
         NetworkSnapshot.timestamp >= cutoff,
@@ -364,7 +364,7 @@ def get_isp_health(
     status classification based on ITU-T G.114 thresholds.
     Designed for gauge/speedometer widgets.
     """
-    from datetime import datetime, timedelta
+    from datetime import datetime, timedelta, timezone
 
     network = db.query(Network).first()
 
@@ -383,7 +383,7 @@ def get_isp_health(
             current_jitter = float(metrics.jitter) if metrics.jitter is not None else None
 
     # 1-hour historical stats from snapshots
-    cutoff = datetime.utcnow() - timedelta(hours=1)
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=1)
     snapshots = db.query(NetworkSnapshot).filter(
         NetworkSnapshot.timestamp >= cutoff,
     ).all()

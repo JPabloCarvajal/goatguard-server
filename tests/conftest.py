@@ -9,7 +9,7 @@ import sys
 sys.path.insert(0, ".")
 
 import pytest
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine
@@ -116,7 +116,7 @@ def seed_data(db_session):
     Devuelve un dict con los objetos creados para que los tests
     puedan inspeccionarlos sin re-consultar.
     """
-    now = datetime.utcnow()
+    now = datetime.now(timezone.utc)
 
     # Network
     network = Network(

@@ -16,7 +16,7 @@ Runs in a background thread with a configurable check interval.
 import logging
 import threading
 import time
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ class HealthChecker:
 
     def _check_agents(self) -> None:
         """Query all agents and mark timed-out ones as inactive."""
-        cutoff = datetime.utcnow() - timedelta(seconds=self.timeout_seconds)
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=self.timeout_seconds)
         inactive_count = self.repo.mark_inactive_agents(cutoff)
 
         if inactive_count > 0:
