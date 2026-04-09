@@ -24,3 +24,6 @@ mac-vendor-lookup>=0.1
 
 # WebSocket
 websockets>=11.0
+
+# Push notifications (Firebase Cloud Messaging)
+firebase-admin>=6.5

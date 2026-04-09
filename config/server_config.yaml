@@ -25,3 +25,7 @@ security:
   jwt_secret: "goatguard-dev-secret-change-in-production"
   jwt_algorithm: "HS256"
   jwt_expiration_hours: 24
+
+firebase:
+  credentials_path: "config/firebase-service-account.json"
+  enabled: true

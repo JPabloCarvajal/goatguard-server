@@ -32,6 +32,9 @@ pgdata/
 # Environment variables (secrets)
 .env
 
+# Firebase service account (secret)
+config/firebase-service-account.json
+
 # Testing
 .coverage
 .pytest_cache/

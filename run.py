@@ -21,6 +21,7 @@ from src.discovery.arp_scanner import ArpScanner
 import threading
 from src.detection.engine import DetectionEngine
 from src.api.websocket import alert_queue
+from src.api.fcm_notifier import FCMNotifier
 
 logging.basicConfig(
     level=logging.INFO,
@@ -64,9 +65,16 @@ def main():
     )
     isp_probe.start()
 
+    fcm_notifier = FCMNotifier(
+        credentials_path=config.firebase.credentials_path,
+        repository=repo,
+        enabled=config.firebase.enabled,
+    )
+
     def push_alert(alert_data: dict) -> None:
-        """Bridge: sync detection engine → async WebSocket."""
+        """Bridge: sync detection engine → async WebSocket + FCM push."""
         alert_queue.put(alert_data)
+        fcm_notifier.send_alert(alert_data)
 
     detection_engine = DetectionEngine(
         repository=repo,
