@@ -16,7 +16,7 @@ mitigar ataques de fuerza bruta y enumeración.
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.security import HTTPBearer
@@ -37,6 +37,7 @@ from src.api.dependencies import (
 from src.api.rate_limit import limiter
 from src.api.registration_utils import (
     check_password_hibp,
+    generate_invitation_token,
     generate_recovery_code,
     hash_invitation_token,
     hash_recovery_code,
@@ -46,6 +47,8 @@ from src.api.registration_utils import (
 from src.api.schemas.auth_schemas import (
     BackupCodeVerifyRequest,
     BackupCodesResponse,
+    BootstrapStatusResponse,
+    InvitationResponse,
     LoginRequest,
     LoginStep1Response,
     RecoveryVerifyRequest,
@@ -86,6 +89,66 @@ _DUMMY_BCRYPT_HASH = (
 )
 
 
+# ── Bootstrap Status ──────────────────────────────────────────────────────────
+
+
+@router.get(
+    "/bootstrap-status",
+    response_model=BootstrapStatusResponse,
+)
+@limiter.limit("10/minute")
+def bootstrap_status(
+    request: Request,
+    db: Session = Depends(get_db),
+):
+    """Indica si el sistema necesita bootstrap (0 usuarios).
+
+    Endpoint público sin auth. Solo devuelve booleano, no el conteo exacto.
+    """
+    user_count = db.query(User).count()
+    return BootstrapStatusResponse(needs_bootstrap=user_count == 0)
+
+
+# ── Invitaciones ─────────────────────────────────────────────────────────────
+
+
+@router.post(
+    "/invitations",
+    response_model=InvitationResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+@limiter.limit("10/minute")
+def create_invitation(
+    request: Request,
+    current_user: User = Depends(get_current_user_totp_verified),
+    db: Session = Depends(get_db),
+):
+    """Genera un invitation token para registrar otro administrador.
+
+    Requiere scope=full_access (admin autenticado con TOTP verificado).
+    El token se devuelve en claro una sola vez. En BD se guarda el SHA-256.
+    Expiración: 24 horas.
+    """
+    plain_token = generate_invitation_token()
+    token_hash = hash_invitation_token(plain_token)
+    now = datetime.now(timezone.utc)
+    expires_at = now + timedelta(hours=24)
+
+    invitation = InvitationToken(
+        token_hash=token_hash,
+        expires_at=expires_at,
+    )
+    db.add(invitation)
+    db.commit()
+
+    logger.info("Invitation token generado por: %s", current_user.username)
+
+    return InvitationResponse(
+        invitation_token=plain_token,
+        expires_at=expires_at.isoformat(),
+    )
+
+
 # ── Registro ──────────────────────────────────────────────────────────────────
 
 
@@ -100,42 +163,79 @@ def register(
     body: RegisterRequest,
     db: Session = Depends(get_db),
 ):
-    """Registra un nuevo administrador con invitation token [RF-13].
+    """Registra un nuevo administrador [RF-13].
 
     Rate limit: 5/minute para limitar enumeración de invitation tokens.
 
+    Bootstrap: si la BD tiene 0 usuarios, invitation_token es opcional.
+    A partir del primer usuario, invitation_token es obligatorio.
+
     Flujo:
-    1. Invitation token válido (SHA-256 lookup, no usado, no expirado).
+    1. Si user_count > 0: invitation token válido (SHA-256 lookup, no usado, no expirado).
     2. Username no existente.
     3. Password cumple NIST + no aparece en HIBP (si está habilitado).
     4. Genera TOTP secret (cifrado) y recovery code (hash bcrypt).
-    5. Marca invitation como usada atómicamente.
+    5. Marca invitation como usada atómicamente (si aplica).
     6. Emite JWT scope=pending_totp para completar enrollment.
     """
     security = get_security_config()
 
-    token_hash = hash_invitation_token(body.invitation_token)
-    invitation = db.query(InvitationToken).filter_by(
-        token_hash=token_hash,
-    ).first()
+    user_count = db.query(User).count()
+    is_bootstrap = user_count == 0
+    invitation = None
 
-    if not invitation:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
-        )
+    if not is_bootstrap:
+        # Requiere invitation token
+        if not body.invitation_token:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
+            )
+        token_hash = hash_invitation_token(body.invitation_token)
+        invitation = db.query(InvitationToken).filter_by(
+            token_hash=token_hash,
+        ).with_for_update().first()
 
-    now = datetime.now(timezone.utc)
-    if invitation.used:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
-        )
-    expires_at = invitation.expires_at
-    if expires_at.tzinfo is None:
-        expires_at = expires_at.replace(tzinfo=timezone.utc)
-    if expires_at < now:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
-        )
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
+            )
+
+        now = datetime.now(timezone.utc)
+        if invitation.used:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
+            )
+        expires_at = invitation.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < now:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
+            )
+    elif body.invitation_token:
+        # Bootstrap con token proporcionado — validarlo igualmente
+        token_hash = hash_invitation_token(body.invitation_token)
+        invitation = db.query(InvitationToken).filter_by(
+            token_hash=token_hash,
+        ).with_for_update().first()
+
+        if not invitation:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
+            )
+
+        now = datetime.now(timezone.utc)
+        if invitation.used:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
+            )
+        expires_at = invitation.expires_at
+        if expires_at.tzinfo is None:
+            expires_at = expires_at.replace(tzinfo=timezone.utc)
+        if expires_at < now:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST, detail=_REGISTER_FAIL,
+            )
 
     existing = db.query(User).filter_by(username=body.username).first()
     if existing:
@@ -168,8 +268,10 @@ def register(
     )
     db.add(user)
 
-    invitation.used = True
-    invitation.used_at = now
+    if invitation is not None:
+        now = datetime.now(timezone.utc)
+        invitation.used = True
+        invitation.used_at = now
 
     db.commit()
     db.refresh(user)
