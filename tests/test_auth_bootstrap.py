@@ -102,9 +102,7 @@ def _register_admin(client, db_session, username="admin"):
         json={"username": username, "password": _VALID_PASSWORD},
     )
     assert response.status_code == 201
-    token = response.json()["access_token"]
-    # El token tiene scope=pending_totp, necesitamos full_access para invitations
-    # Hack: generamos un token full_access directamente para testing
+    # El token del registro tiene scope=pending_totp, necesitamos full_access
     from src.api.auth import create_token
     user = db_session.query(User).filter_by(username=username).first()
     full_token = create_token(user.id, user.username, scope="full_access")
