@@ -7,6 +7,8 @@ llegar a la lógica del endpoint. Esto simplifica los handlers y asegura
 que los tests contra la API validen comportamiento, no formato.
 """
 
+from typing import Optional
+
 from pydantic import BaseModel, Field
 
 
@@ -14,11 +16,26 @@ class RegisterRequest(BaseModel):
     """Registro de un nuevo usuario mediante invitation token.
 
     Password con ventana NIST SP 800-63B: mínimo 15, máximo 128 chars.
+    invitation_token es opcional: si la BD tiene 0 usuarios (bootstrap),
+    se permite registro sin token. A partir del segundo usuario, se requiere.
     """
 
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=15, max_length=128)
+    invitation_token: Optional[str] = None
+
+
+class BootstrapStatusResponse(BaseModel):
+    """Estado de bootstrap del sistema."""
+
+    needs_bootstrap: bool
+
+
+class InvitationResponse(BaseModel):
+    """Token de invitación generado por un admin."""
+
     invitation_token: str
+    expires_at: str
 
 
 class RegisterResponse(BaseModel):
